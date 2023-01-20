@@ -4,7 +4,9 @@
 
 // NB: This differs from the GitHub version due to the different
 // location of the nanoflann header when installing from source
-#include <nanoflann/nanoflann.hpp>
+// #include <nanoflann/nanoflann.hpp>
+#include <nanoflann.hpp>
+
 #include <pangolin/geometry/geometry.h>
 #include <pangolin/pangolin.h>
 #include <Eigen/Core>
