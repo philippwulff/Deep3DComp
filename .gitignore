@@ -1,6 +1,7 @@
 bin/*
 build/*
 data/*
+.vscode
 
 # Log files, reconstructions
 **/LatentCodes

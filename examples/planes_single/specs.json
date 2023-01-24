@@ -4,7 +4,7 @@
   "DataSource" : "data",
   "TrainSplit" : "examples/splits/sv2_planes_train_single.json",
   "TestSplit" : "examples/splits/sv2_planes_test_single.json",
-  "NetworkArch" : "deep_sdf_decoder",
+  "NetworkArch" : "siren_decoder",
   "NetworkSpecs" : {
     "dims" : [ 512, 512, 512, 512, 512, 512, 512, 512 ],
     "dropout" : [0, 1, 2, 3, 4, 5, 6, 7],
@@ -12,7 +12,6 @@
     "norm_layers" : [0, 1, 2, 3, 4, 5, 6, 7],
     "latent_in" : [4],
     "xyz_in_all" : false,
-    "use_tanh" : false,
     "latent_dropout" : false,
     "weight_norm" : true
     },
