@@ -9,6 +9,7 @@ model_params_subdir = "ModelParameters"
 optimizer_params_subdir = "OptimizerParameters"
 latent_codes_subdir = "LatentCodes"
 logs_filename = "Logs.pth"
+tb_logs_dir = "TensorBoard"
 reconstructions_subdir = "Reconstructions"
 reconstruction_meshes_subdir = "Meshes"
 reconstruction_codes_subdir = "Codes"
@@ -21,7 +22,7 @@ normalization_param_subdir = "NormalizationParameters"
 training_meshes_subdir = "TrainingMeshes"
 
 
-def load_experiment_specifications(experiment_directory):
+def load_experiment_specifications(experiment_directory: str) -> dict:
 
     filename = os.path.join(experiment_directory, specifications_filename)
 

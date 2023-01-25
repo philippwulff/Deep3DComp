@@ -3,6 +3,7 @@
 
 import torch
 import torch.utils.data as data_utils
+from torch.utils.tensorboard import SummaryWriter
 import signal
 import sys
 import os
@@ -15,6 +16,7 @@ import deep_sdf
 import deep_sdf.workspace as ws
 
 from torch.utils.tensorboard import SummaryWriter
+
 
 class LearningRateSchedule:
     def get_learning_rate(self, epoch):
@@ -249,9 +251,13 @@ def append_parameter_magnitudes(param_mag_log, model):
         param_mag_log[name].append(param.data.norm().item())
 
 
-def main_function(experiment_directory, continue_from, batch_split):
+def get_summary_writer(experiment_dir: str):
+    return SummaryWriter(log_dir=os.path.join(experiment_dir, ws.tb_logs_dir))
 
-    logging.debug("running " + experiment_directory)
+
+def main_function(experiment_directory: str, continue_from, batch_split: int):
+
+    logging.debug("running experiment " + experiment_directory)
 
     specs = ws.load_experiment_specifications(experiment_directory)
 
@@ -285,13 +291,11 @@ def main_function(experiment_directory, continue_from, batch_split):
         logging.debug("clipping gradients to max norm {}".format(grad_clip))
 
     def save_latest(epoch):
-
         save_model(experiment_directory, "latest.pth", decoder, epoch)
         save_optimizer(experiment_directory, "latest.pth", optimizer_all, epoch)
         save_latent_vectors(experiment_directory, "latest.pth", lat_vecs, epoch)
 
     def save_checkpoints(epoch):
-
         save_model(experiment_directory, str(epoch) + ".pth", decoder, epoch)
         save_optimizer(experiment_directory, str(epoch) + ".pth", optimizer_all, epoch)
         save_latent_vectors(experiment_directory, str(epoch) + ".pth", lat_vecs, epoch)
@@ -301,7 +305,6 @@ def main_function(experiment_directory, continue_from, batch_split):
         sys.exit(0)
 
     def adjust_learning_rate(lr_schedules, optimizer, epoch):
-
         for i, param_group in enumerate(optimizer.param_groups):
             param_group["lr"] = lr_schedules[i].get_learning_rate(epoch)
 
@@ -390,6 +393,9 @@ def main_function(experiment_directory, continue_from, batch_split):
             },
         ]
     )
+
+    summary_writer = get_summary_writer(experiment_directory)
+    # TODO: possibly log hparams here
 
     loss_log = []
     lr_log = []
