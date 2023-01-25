@@ -140,7 +140,7 @@ class SirenDecoder(nn.Module):
         # if applicable, special first-i initialization scheme.
         NLS_AND_INITS = {
             "sine": (Sine(), sine_init, first_layer_sine_init),
-            "relu": (nn.ReLU(inplace=True), init_weights_normal, None),
+            "relu": (nn.ReLU(), init_weights_normal, None),
         }
         try:
             self.nl, weight_init, first_layer_init = NLS_AND_INITS[nonlinearity]
@@ -211,6 +211,7 @@ class SirenDecoder(nn.Module):
                 if self.dropout and i in self.dropout:
                     x = F.dropout(x, p=self.dropout_prob, training=self.training)
 
+        # Last layer.
         if hasattr(self, "sigmoid"):      
             x = self.sigmoid(x)
         elif hasattr(self, "tanh"):      
