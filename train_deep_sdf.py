@@ -456,8 +456,6 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         )
     )
 
-    # Setup Tensor Board Logging
-    writer = SummaryWriter(log_dir=experiment_directory)
     
     for epoch in range(start_epoch, num_epochs + 1):
 
@@ -468,7 +466,6 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         decoder.train()
 
         adjust_learning_rate(lr_schedules, optimizer_all, epoch)
-
         for sdf_data, indices in sdf_loader:
 
             # Process the input data
@@ -524,7 +521,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             
                 
             logging.debug("loss = {}".format(batch_loss))
-            writer.add_scalar("1 Loss", batch_loss.cpu().detach().numpy())
+            summary_writer.add_scalar("1 Loss", batch_loss, global_step=epoch)
             loss_log.append(batch_loss)
 
             if grad_clip is not None:
@@ -539,12 +536,12 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         timing_log.append(seconds_elapsed)
 
         lr_log.append([schedule.get_learning_rate(epoch) for schedule in lr_schedules])
-        writer.add_scalar("2 Params Learning Rate", lr_schedules[0].get_learning_rate(epoch))
-        writer.add_scalar("2 Latent Learning Rate", lr_schedules[1].get_learning_rate(epoch))
+        summary_writer.add_scalar("Learning Rate/Params", lr_schedules[0].get_learning_rate(epoch), global_step=epoch)
+        summary_writer.add_scalar("Learning Rate/Code", lr_schedules[1].get_learning_rate(epoch), global_step=epoch)
 
         mlm = get_mean_latent_vector_magnitude(lat_vecs)
         lat_mag_log.append(mlm)
-        writer.add_scalar("3 Mean Latent Magnitude", mlm)
+        summary_writer.add_scalar("Mean Latent Magnitude", mlm, global_step=epoch)
 
         append_parameter_magnitudes(param_mag_log, decoder)
 
@@ -563,6 +560,8 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                 param_mag_log,
                 epoch,
             )
+            
+        summary_writer.flush()    
 
 
 if __name__ == "__main__":
