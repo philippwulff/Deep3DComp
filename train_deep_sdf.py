@@ -250,6 +250,10 @@ def append_parameter_magnitudes(param_mag_log, model):
         param_mag_log[name].append(param.data.norm().item())
 
 
+def get_summary_writer(experiment_dir: str):
+    return SummaryWriter(log_dir=os.path.join(experiment_dir, ws.tb_logs_dir))
+
+
 def main_function(experiment_directory: str, continue_from, batch_split: int):
 
     logging.debug("running experiment " + experiment_directory)
@@ -388,6 +392,9 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             },
         ]
     )
+
+    summary_writer = get_summary_writer(experiment_directory)
+    # TODO: possibly log hparams here
 
     loss_log = []
     lr_log = []
