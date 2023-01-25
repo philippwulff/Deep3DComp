@@ -11,9 +11,11 @@
     "dropout_prob" : 0.2,
     "norm_layers" : [0, 1, 2, 3, 4, 5, 6, 7],
     "latent_in" : [4],
+    "xyz_in": [4],
     "xyz_in_all" : false,
     "latent_dropout" : false,
-    "weight_norm" : true
+    "weight_norm" : true,
+    "nonlinearity": "relu"
     },
   "CodeLength" : 256,
   "NumEpochs" : 2001,

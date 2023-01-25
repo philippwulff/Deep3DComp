@@ -43,8 +43,8 @@ class Decoder(nn.Module):
         **siren_decoder_kwargs,
     ):
         """
-        1 means no encoding
-        xyz_in: starting from 1
+        encoding_features: 1 means no encoding
+        xyz_in: starting from layer 1
         """
         super(Decoder, self).__init__()
         self.encoding_features = encoding_features
@@ -62,6 +62,7 @@ class Decoder(nn.Module):
         xyz_in = list(xyz_in)       # Cast to tuple to list to use '.append'
         xyz_in.append(0)
         xyz_input_dims = [xyz_dim if (xyz_in_all or i in xyz_in) else 0 for i in range(num_layers-1)] + [0]
+
 
         self.decoder = SirenDecoder(
             latent_size=latent_size,
@@ -101,15 +102,18 @@ class SirenDecoder(nn.Module):
         latent_size: int,
         dropout: list = None,
         dropout_prob: float = 0.0,
-        norm_layers: list = (),
-        latent_in: list = (),
+        norm_layers: list = [],
+        latent_in: list = [],
         weight_norm: bool = False,
         latent_dropout: bool = False,
         nonlinearity: str = "relu",
+        final_nonlinearity: str = "tanh",
         ):
         """
-        latent_in: starting from 1
-
+        latent_in: starting from layer 1
+            The original DeepSDF decoder streams latent_vecs and xyz into each layer in latent_in. 
+            This module seperates the instreaming layers for latent_vecs and xyz with different arguments.
+        xyz_in: starting from layer 1
         """
         super(SirenDecoder, self).__init__()
 
@@ -123,11 +127,14 @@ class SirenDecoder(nn.Module):
         self.num_layers = len(dims) + 2
         self.xyz_input_dims = xyz_input_dims
 
-        # The dimension of each layer without external inputs.
-        fc_dims = [0] + dims + [1]
         # The dimension of the latent_vec input to every hidden i.
         self.latent_in.append(0)
         latent_input_dims = [latent_size if (i in self.latent_in) else 0 for i in range(self.num_layers-1)] + [0]
+        # The dimension of each layer without external inputs.
+        fc_dims = [0] + dims + [1]
+        fc_dims = [0] + [dims[i]-xyz_input_dims[1:][i]-latent_input_dims[1:][i] for i in range(len(dims))] + [1]
+
+        assert all([_>0 for _ in fc_dims[1:]]), f"LAYER WIDTH (dims) TOO SMALL FOR INSTREAMING: fc_dims {fc_dims}"
 
         # Maps nonlinearity name to the function, initialization, and, 
         # if applicable, special first-i initialization scheme.
@@ -135,11 +142,14 @@ class SirenDecoder(nn.Module):
             "sine": (Sine(), sine_init, first_layer_sine_init),
             "relu": (nn.ReLU(inplace=True), init_weights_normal, None),
         }
-        self.nl, weight_init, first_layer_init = NLS_AND_INITS[nonlinearity]
+        try:
+            self.nl, weight_init, first_layer_init = NLS_AND_INITS[nonlinearity]
+        except KeyError as e:
+            raise NotImplementedError(f"Nonlinearity '{nonlinearity}' is not available.")
 
         for i in range(self.num_layers-1):
             in_dim = fc_dims[i] + xyz_input_dims[i] + latent_input_dims[i]
-            out_dim = fc_dims[i + 1]
+            out_dim = fc_dims[i + 1] 
             
             # Add a linear i.
             if weight_norm and i in self.norm_layers:
@@ -160,13 +170,16 @@ class SirenDecoder(nn.Module):
             getattr(self, "lin0").apply(first_layer_init)
 
         if nonlinearity == "relu":
-            # Final nonlinearity is sigmoid.
-            self.sigmoid = nn.Sigmoid()
+            if final_nonlinearity == "tanh":
+                self.tanh = nn.Tanh()
+            elif final_nonlinearity == "sigmoid":
+                self.sigmoid = nn.Sigmoid()
 
     def forward(self, latent_vecs, xyz, xyz_encoded):
         """
         latent_vecs: N x L
-        xyz: N x 3 or N x 3*encoding_features
+        xyz: N x 3 
+        xyz_encoded: N x 2*encoding_features
         """
         # Prepare the inputs to the first layer.
         if latent_vecs is not None and self.latent_dropout:
@@ -189,7 +202,7 @@ class SirenDecoder(nn.Module):
                         x = torch.cat([x, xyz_encoded], 1)
             x = lin(x)
 
-            if i < self.num_layers - 1:
+            if i < self.num_layers - 2:
                 # If not the last layer.
                 if i in self.norm_layers and not self.weight_norm:
                     bn = getattr(self, f"bn{i}")
@@ -200,6 +213,8 @@ class SirenDecoder(nn.Module):
 
         if hasattr(self, "sigmoid"):      
             x = self.sigmoid(x)
+        elif hasattr(self, "tanh"):      
+            x = self.tanh(x)
 
         return x
 
