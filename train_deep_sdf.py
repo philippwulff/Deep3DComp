@@ -467,7 +467,6 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
         adjust_learning_rate(lr_schedules, optimizer_all, epoch)
         for sdf_data, indices in sdf_loader:
-
             # Process the input data
             sdf_data = sdf_data.reshape(-1, 4)
 
@@ -496,15 +495,14 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             for i in range(batch_split):
 
                 batch_vecs = lat_vecs(indices[i])
-
                 input = torch.cat([batch_vecs, xyz[i]], dim=1)
-
+                
                 # NN optimization
                 pred_sdf = decoder(input)
 
                 if enforce_minmax:
                     pred_sdf = torch.clamp(pred_sdf, minT, maxT)
-
+                print(pred_sdf.device)
                 chunk_loss = loss_l1(pred_sdf, sdf_gt[i].cuda()) / num_sdf_samples
 
                 if do_code_regularization:
