@@ -14,6 +14,7 @@ import time
 import deep_sdf
 import deep_sdf.workspace as ws
 
+from torch.utils.tensorboard import SummaryWriter
 
 class LearningRateSchedule:
     def get_learning_rate(self, epoch):
@@ -449,6 +450,9 @@ def main_function(experiment_directory, continue_from, batch_split):
         )
     )
 
+    # Setup Tensor Board Logging
+    writer = SummaryWriter(log_dir=experiment_directory)
+    
     for epoch in range(start_epoch, num_epochs + 1):
 
         start = time.time()
@@ -511,9 +515,10 @@ def main_function(experiment_directory, continue_from, batch_split):
                 chunk_loss.backward()
 
                 batch_loss += chunk_loss.item()
-
+            
+                
             logging.debug("loss = {}".format(batch_loss))
-
+            writer.add_scalar("1 Loss", batch_loss.cpu().detach().numpy())
             loss_log.append(batch_loss)
 
             if grad_clip is not None:
@@ -528,8 +533,12 @@ def main_function(experiment_directory, continue_from, batch_split):
         timing_log.append(seconds_elapsed)
 
         lr_log.append([schedule.get_learning_rate(epoch) for schedule in lr_schedules])
+        writer.add_scalar("2 Params Learning Rate", lr_schedules[0].get_learning_rate(epoch))
+        writer.add_scalar("2 Latent Learning Rate", lr_schedules[1].get_learning_rate(epoch))
 
-        lat_mag_log.append(get_mean_latent_vector_magnitude(lat_vecs))
+        mlm = get_mean_latent_vector_magnitude(lat_vecs)
+        lat_mag_log.append(mlm)
+        writer.add_scalar("3 Mean Latent Magnitude", mlm)
 
         append_parameter_magnitudes(param_mag_log, decoder)
 
