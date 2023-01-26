@@ -2,7 +2,8 @@ import torch.nn as nn
 import torch
 import torch.nn.functional as F
 import numpy as np
-from networks.modules import Sine, Encoding3D
+# from networks.modules import Sine, Encoding3D
+from modules import Sine, Encoding3D
 
 
 def sine_init(m):
@@ -62,7 +63,8 @@ class Decoder(nn.Module):
         xyz_in = list(xyz_in)       # Cast to tuple to list to use '.append'
         xyz_in.append(0)
         xyz_input_dims = [xyz_dim if (xyz_in_all or i in xyz_in) else 0 for i in range(num_layers-1)] + [0]
-
+        if xyz_in_all:
+            xyz_in = list(range(num_layers))
 
         self.decoder = SirenDecoder(
             latent_size=latent_size,
@@ -107,7 +109,7 @@ class SirenDecoder(nn.Module):
         weight_norm: bool = False,
         latent_dropout: bool = False,
         nonlinearity: str = "relu",
-        final_nonlinearity: str = "tanh",
+        use_tanh: bool = False,
         ):
         """
         latent_in: starting from layer 1
@@ -169,11 +171,8 @@ class SirenDecoder(nn.Module):
             # Apply special initialization to first i, if applicable.
             getattr(self, "lin0").apply(first_layer_init)
 
-        if nonlinearity == "relu":
-            if final_nonlinearity == "tanh":
-                self.tanh = nn.Tanh()
-            elif final_nonlinearity == "sigmoid":
-                self.sigmoid = nn.Sigmoid()
+        if use_tanh:
+            self.tanh = nn.Tanh()
 
     def forward(self, latent_vecs, xyz, xyz_encoded):
         """
@@ -212,9 +211,7 @@ class SirenDecoder(nn.Module):
                     x = F.dropout(x, p=self.dropout_prob, training=self.training)
 
         # Last layer.
-        if hasattr(self, "sigmoid"):      
-            x = self.sigmoid(x)
-        elif hasattr(self, "tanh"):      
+        if hasattr(self, "tanh"):      
             x = self.tanh(x)
 
         return x
@@ -224,16 +221,16 @@ class SirenDecoder(nn.Module):
 if __name__ == "__main__":
     hparams = {
         "dims": [100, 100, 100, 100],
-        "encoding_features": 15,  
-        "latent_size": 50,
+        "encoding_features": 1,  
+        "latent_size": 10,
         "encoding_sigma": 0,
-        "dropout_layers": [],
+        "dropout": [],
         "dropout_prob": 0.0,
         "norm_layers": [],
         "latent_in": [2],
         "weight_norm": False,
         "xyz_in": [2],
-        "xyz_in_all": False,
+        "xyz_in_all": True,
         "latent_dropout": False,
         "nonlinearity": "sine",     # "relu"
     }
