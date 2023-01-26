@@ -25,7 +25,7 @@ def create_mesh(
 
     overall_index = torch.arange(0, N ** 3, 1, out=torch.LongTensor())
     samples = torch.zeros(N ** 3, 4)
-
+    
     # transform first 3 columns
     # to be the x, y, z index
     samples[:, 2] = overall_index % N
@@ -99,7 +99,6 @@ def convert_sdf_samples_to_ply(
     verts, faces, normals, values = skimage.measure.marching_cubes(
         numpy_3d_sdf_tensor, level=0.0, spacing=[voxel_size] * 3, method="lewiner"
     )
-
     # transform from voxel coordinates to camera coordinates
     # note x and y are flipped in the output of marching_cubes
     mesh_points = np.zeros_like(verts)

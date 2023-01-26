@@ -13,8 +13,10 @@ import json
 import time
 
 import deep_sdf
+from deep_sdf.mesh import create_mesh
 import deep_sdf.workspace as ws
 
+from torch.utils.tensorboard import SummaryWriter
 
 
 class LearningRateSchedule:
@@ -338,7 +340,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
     num_epochs = specs["NumEpochs"]
     log_frequency = get_spec_with_default(specs, "LogFrequency", 10)
-
+    
     with open(train_split_file, "r") as f:
         train_split = json.load(f)
 
@@ -348,6 +350,13 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
     num_data_loader_threads = get_spec_with_default(specs, "DataLoaderThreads", 1)
     logging.debug("loading data with {} threads".format(num_data_loader_threads))
+    
+    plot_frequency = get_spec_with_default(specs, "PlotFrequency", 10)
+    num_plots = get_spec_with_default(specs, "PlotNumber", 5)
+    plot_res = get_spec_with_default(specs, "PlotRes", 128)
+    num_plots = min(num_plots, len(sdf_dataset))
+    plot_indices = torch.randperm(len(sdf_dataset))[:num_plots].tolist()
+    logging.debug(f"Plotting {num_plots} shapes with indices {plot_indices}")
 
     sdf_loader = data_utils.DataLoader(
         sdf_dataset,
@@ -394,7 +403,6 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
     )
 
     summary_writer = get_summary_writer(experiment_directory)
-    # TODO: possibly log hparams here
 
     loss_log = []
     lr_log = []
@@ -455,6 +463,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         )
     )
 
+    
     for epoch in range(start_epoch, num_epochs + 1):
 
         start = time.time()
@@ -464,9 +473,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         decoder.train()
 
         adjust_learning_rate(lr_schedules, optimizer_all, epoch)
-
         for sdf_data, indices in sdf_loader:
-
             # Process the input data
             sdf_data = sdf_data.reshape(-1, 4)
 
@@ -495,15 +502,13 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             for i in range(batch_split):
 
                 batch_vecs = lat_vecs(indices[i])
-
                 input = torch.cat([batch_vecs, xyz[i]], dim=1)
-
+                
                 # NN optimization
                 pred_sdf = decoder(input)
 
                 if enforce_minmax:
                     pred_sdf = torch.clamp(pred_sdf, minT, maxT)
-
                 chunk_loss = loss_l1(pred_sdf, sdf_gt[i].cuda()) / num_sdf_samples
 
                 if do_code_regularization:
@@ -517,9 +522,10 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                 chunk_loss.backward()
 
                 batch_loss += chunk_loss.item()
-
+            
+                
             logging.debug("loss = {}".format(batch_loss))
-
+            summary_writer.add_scalar("1 Loss", batch_loss, global_step=epoch)
             loss_log.append(batch_loss)
 
             if grad_clip is not None:
@@ -534,8 +540,12 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         timing_log.append(seconds_elapsed)
 
         lr_log.append([schedule.get_learning_rate(epoch) for schedule in lr_schedules])
+        summary_writer.add_scalar("Learning Rate/Params", lr_schedules[0].get_learning_rate(epoch), global_step=epoch)
+        summary_writer.add_scalar("Learning Rate/Code", lr_schedules[1].get_learning_rate(epoch), global_step=epoch)
 
-        lat_mag_log.append(get_mean_latent_vector_magnitude(lat_vecs))
+        mlm = get_mean_latent_vector_magnitude(lat_vecs)
+        lat_mag_log.append(mlm)
+        summary_writer.add_scalar("Mean Latent Magnitude", mlm, global_step=epoch)
 
         append_parameter_magnitudes(param_mag_log, decoder)
 
@@ -554,6 +564,18 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                 param_mag_log,
                 epoch,
             )
+            
+        if epoch % plot_frequency == 0:
+            for index in plot_indices:
+                lat_vec = lat_vecs(torch.LongTensor([index])).cuda()
+                mesh_name = sdf_dataset.npyfiles[index].split(".npz")[0].split("/")[-1]
+                path = os.path.join(experiment_directory, ws.meshes_dir, mesh_name)
+                if not os.path.exists(path):
+                    os.makedirs(path)
+                filename = os.path.join(path, f"train_mesh_epoch={epoch:03d}")
+                create_mesh(decoder, lat_vec, filename)
+            
+        summary_writer.flush()    
 
 
 if __name__ == "__main__":
