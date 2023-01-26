@@ -577,6 +577,11 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             
         summary_writer.flush()    
 
+    # log hparams to tensor board
+    writer_hparams = {k: (torch.tensor(v) if type(v) == list else v) for k, v in specs["NetworkSpecs"].items()}
+    summary_writer.add_hparams(writer_hparams, {"TrainLoss":min(loss_log)}, run_name='.')
+    summary_writer.flush()    
+    summary_writer.close()
 
 if __name__ == "__main__":
 

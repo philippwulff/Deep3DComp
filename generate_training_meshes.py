@@ -41,7 +41,7 @@ def code_to_mesh(experiment_directory, checkpoint, keep_normalized=False):
 
     decoder.eval()
 
-    latent_vectors = ws.load_latent_vectors(experiment_directory, checkpoint)
+    latent_vectors = ws.load_latent_vectors(experiment_directory, checkpoint).cuda()
 
     train_split_file = specs["TrainSplit"]
 

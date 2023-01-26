@@ -9,6 +9,16 @@ from math import log10
 def random_between(min, max):
     return min + random.random() * (max - min)
 
+def sample_value(values):
+    if len(values) == 1:
+        return values[0]
+    if type(values[0]) in (str, bool):
+        sampled_value = np.random.choice(values)
+    elif type(values[0]) == int:
+        sampled_value = int(random_between(*values))
+    else:
+        sampled_value = random_between(*values)
+    return sampled_value
 
 SEARCH_DIR = "/home/shared/deepsdf/searches/sirenVrelu"
 HPARAM_RANGES_FILE = os.path.join(SEARCH_DIR, "hparam_ranges.json")
@@ -36,24 +46,14 @@ for i in range(NUM_EXPERIMENTS):
     for k, v in hparam_ranges.items():
         if k in ("NetworkSpecs", "LearningRateSchedule"):
             continue
-        if type(v[0]) == str:
-            sampled_v = np.random.choice(v)
-        elif type(v[0]) == int:
-            sampled_v = int(random_between(*v))
-        else:
-            sampled_v = random_between(*v)
+        sampled_v = sample_value(v)
         specs[k] = sampled_v
         if len(v) > 1 and (v[0] != v[1]):
             searched_hparams[k] = sampled_v
 
     # sample architecture hparams
     for k, v in hparam_ranges["NetworkSpecs"].items():
-        if type(v[0]) == str:
-            sampled_v = np.random.choice(v)
-        elif type(v[0]) == int:
-            sampled_v = int(random_between(*v))
-        else:
-            sampled_v = random_between(*v)
+        sampled_v = sample_value(v)
         # handle build of dims array separateley
         if k in ("depth", "width"):
             if not "depth" in hparam_ranges["NetworkSpecs"] and "width" in hparam_ranges["NetworkSpecs"]:
@@ -81,16 +81,16 @@ for i in range(NUM_EXPERIMENTS):
                 if len(v) > 1 and (v[0] != v[1]):
                     searched_hparams["LrInitial"] = sampled_v
                 continue
-            elif type(v[0]) == str:
-                sampled_v = np.random.choice(v)
-            elif type(v[0]) == int:
-                sampled_v = int(random_between(*v))
             else:
-                sampled_v = random_between(*v)
+                sampled_v = sample_value(v)
             specs["LearningRateSchedule"][i][k] = sampled_v
             if len(v) > 1 and (v[0] != v[1]):
                 searched_hparams[k] = sampled_v
     
+    # TODO remove
+    if specs["NetworkSpecs"]["nonlinearity"] == "relu":
+        continue
+
     # find exp name (continuous counter and searched hparams)
     exp_number = 0
     if os.path.exists(SEARCH_DIR):
