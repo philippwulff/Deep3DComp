@@ -13,6 +13,7 @@ import json
 import time
 
 import deep_sdf
+from deep_sdf.mesh import create_mesh
 import deep_sdf.workspace as ws
 
 from torch.utils.tensorboard import SummaryWriter
@@ -339,7 +340,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
     num_epochs = specs["NumEpochs"]
     log_frequency = get_spec_with_default(specs, "LogFrequency", 10)
-
+    
     with open(train_split_file, "r") as f:
         train_split = json.load(f)
 
@@ -349,6 +350,13 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
     num_data_loader_threads = get_spec_with_default(specs, "DataLoaderThreads", 1)
     logging.debug("loading data with {} threads".format(num_data_loader_threads))
+    
+    plot_frequency = get_spec_with_default(specs, "PlotFrequency", 10)
+    num_plots = get_spec_with_default(specs, "PlotNumber", 5)
+    plot_res = get_spec_with_default(specs, "PlotRes", 128)
+    num_plots = min(num_plots, len(sdf_dataset))
+    plot_indices = torch.randperm(len(sdf_dataset))[:num_plots].tolist()
+    logging.debug(f"Plotting {num_plots} shapes with indices {plot_indices}")
 
     sdf_loader = data_utils.DataLoader(
         sdf_dataset,
@@ -395,7 +403,6 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
     )
 
     summary_writer = get_summary_writer(experiment_directory)
-    # TODO: possibly log hparams here
 
     loss_log = []
     lr_log = []
@@ -502,7 +509,6 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
                 if enforce_minmax:
                     pred_sdf = torch.clamp(pred_sdf, minT, maxT)
-                print(pred_sdf.device)
                 chunk_loss = loss_l1(pred_sdf, sdf_gt[i].cuda()) / num_sdf_samples
 
                 if do_code_regularization:
@@ -558,6 +564,16 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                 param_mag_log,
                 epoch,
             )
+            
+        if epoch % plot_frequency == 0:
+            for index in plot_indices:
+                lat_vec = lat_vecs(torch.LongTensor([index])).cuda()
+                mesh_name = sdf_dataset.npyfiles[index].split(".npz")[0].split("/")[-1]
+                path = os.path.join(experiment_directory, ws.meshes_dir, mesh_name)
+                if not os.path.exists(path):
+                    os.makedirs(path)
+                filename = os.path.join(path, f"train_mesh_epoch={epoch:03d}")
+                create_mesh(decoder, lat_vec, filename)
             
         summary_writer.flush()    
 
