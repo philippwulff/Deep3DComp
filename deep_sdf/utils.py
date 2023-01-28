@@ -38,7 +38,7 @@ def configure_logging(args):
     else:
         logger.setLevel(logging.INFO)
     logger_handler = logging.StreamHandler()
-    formatter = logging.Formatter("DeepSdf - %(levelname)s - %(message)s")
+    formatter = logging.Formatter("DeepSdfComp - %(levelname)s - %(message)s")
     logger_handler.setFormatter(formatter)
     logger.addHandler(logger_handler)
 

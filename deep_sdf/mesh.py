@@ -7,13 +7,13 @@ import plyfile
 import skimage.measure
 import time
 import torch
+from typing import Optional
+import trimesh
 
 import deep_sdf.utils
 
 
-def create_mesh(
-    decoder, latent_vec, filename, N=256, max_batch=32 ** 3, offset=None, scale=None
-):
+def create_mesh(decoder, latent_vec, filename=None, N=256, max_batch=32 ** 3, offset=None, scale=None) -> Optional[trimesh.Trimesh]:
     start = time.time()
     ply_filename = filename
 
@@ -61,14 +61,21 @@ def create_mesh(
     end = time.time()
     print("sampling takes: %f" % (end - start))
 
-    convert_sdf_samples_to_ply(
-        sdf_values.data.cpu(),
-        voxel_origin,
-        voxel_size,
-        ply_filename + ".ply",
-        offset,
-        scale,
-    )
+    if ply_filename:
+        convert_sdf_samples_to_ply(
+            sdf_values.data.cpu(),
+            voxel_origin,
+            voxel_size,
+            ply_filename + ".ply",
+            offset,
+            scale,
+        )
+    else:
+        trimesh.Trimesh()
+        verts, faces, normals, values = skimage.measure.marching_cubes(
+            sdf_values.data.cpu().numpy(), level=0.0, spacing=[voxel_size] * 3, method="lewiner"
+        )
+        return trimesh.Trimesh(face_normals=normals, vertices=verts, faces=faces)
 
 
 def convert_sdf_samples_to_ply(

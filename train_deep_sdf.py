@@ -534,6 +534,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
             optimizer_all.step()
 
+        # LOG EPOCH
         end = time.time()
 
         seconds_elapsed = end - start
@@ -565,7 +566,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                 epoch,
             )
             
-        if epoch % plot_frequency == 0:
+        if epoch % plot_frequency == 0 or epoch % eval_train_frequency:
             for index in plot_indices:
                 lat_vec = lat_vecs(torch.LongTensor([index])).cuda()
                 mesh_name = sdf_dataset.npyfiles[index].split(".npz")[0].split("/")[-1]
