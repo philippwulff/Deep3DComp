@@ -579,7 +579,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                 mesh_class_id = sdf_dataset.npyfiles[index].split(".npz")[0].split(os.sep)[-2]
                 mesh_shape_id = sdf_dataset.npyfiles[index].split(".npz")[0].split(os.sep)[-1]
                 save_name = mesh_class_id + "_" + mesh_shape_id
-                path = os.path.join(experiment_directory, ws.tb_logs_train_reconstructions, save_name)
+                path = os.path.join(experiment_directory, ws.tb_logs_dir, ws.tb_logs_train_reconstructions, save_name)
                 if not os.path.exists(path):
                     os.makedirs(path)
 
@@ -595,9 +595,10 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                     )
                 logging.debug("Total time to create training mesh: {}".format(time.time() - start))
 
-                if do_eval_train:
+                if do_eval_train and train_mesh is not None:
                     gt_mesh_path = f"/mnt/hdd/ShapeNetCore.v2/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
                     chamfer_dist = metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=train_mesh, metric="chamfer")
+                    logging.debug(f"Chamfer distance: {chamfer_dist}.")
                     summary_writer.add_scalar("Chamfer Dist", chamfer_dist, epoch)
 
             # Test-set evaluation: Reconstruct latent and mesh from GT sdf values and compute metrics.

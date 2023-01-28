@@ -71,10 +71,13 @@ def create_mesh(decoder, latent_vec, filename=None, N=256, max_batch=32 ** 3, of
             scale,
         )
     if not ply_filename or return_trimesh:
-        trimesh.Trimesh()
-        verts, faces, normals, values = skimage.measure.marching_cubes(
-            sdf_values.data.cpu().numpy(), level=0.0, spacing=[voxel_size] * 3, method="lewiner"
-        )
+        try:
+            verts, faces, normals, values = skimage.measure.marching_cubes(
+                sdf_values.data.cpu().numpy(), level=0.0, spacing=[voxel_size] * 3, method="lewiner"
+            )
+        except ValueError as e:
+            logging.error("[create_mesh] Error while running marching cubes: {e}.")
+            return
         return trimesh.Trimesh(face_normals=normals, vertices=verts, faces=faces)
 
 
