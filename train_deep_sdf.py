@@ -13,7 +13,7 @@ import json
 import time
 
 import deep_sdf
-from deep_sdf.mesh import create_mesh
+from deep_sdf import mesh, metrics
 import deep_sdf.workspace as ws
 
 from torch.utils.tensorboard import SummaryWriter
@@ -343,6 +343,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
     
     with open(train_split_file, "r") as f:
         train_split = json.load(f)
+        # TODO get list of synsets and shape ids
 
     sdf_dataset = deep_sdf.data.SDFSamples(
         data_source, train_split, num_samp_per_scene, load_ram=False
@@ -355,8 +356,10 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
     num_plots = get_spec_with_default(specs, "PlotNumber", 5)
     plot_res = get_spec_with_default(specs, "PlotRes", 128)
     num_plots = min(num_plots, len(sdf_dataset))
-    plot_indices = torch.randperm(len(sdf_dataset))[:num_plots].tolist()
-    logging.debug(f"Plotting {num_plots} shapes with indices {plot_indices}")
+    eval_train_frequency = get_spec_with_default(specs, "EvalTrainFrequency", 10)
+    eval_indices_train = torch.randperm(len(sdf_dataset))[:num_plots].tolist()
+    logging.debug(f"Plotting {num_plots} shapes with indices {eval_indices_train}")
+    eval_test_frequency = get_spec_with_default(specs, "EvalTestFrequency", 10)
 
     sdf_loader = data_utils.DataLoader(
         sdf_dataset,
@@ -566,19 +569,43 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                 epoch,
             )
             
-        if epoch % plot_frequency == 0 or epoch % eval_train_frequency:
-            for index in plot_indices:
+        do_save_mesh = epoch % plot_frequency == 0
+        do_eval_train = epoch % eval_train_frequency == 0
+        do_eval_test = epoch % eval_test_frequency == 0
+        if any([do_save_mesh, do_eval_train, do_eval_test]):
+            # Training-set evaluation: Reconstruct mesh from learned latent and compute metrics.
+            for index in eval_indices_train:
                 lat_vec = lat_vecs(torch.LongTensor([index])).cuda()
-                mesh_name = sdf_dataset.npyfiles[index].split(".npz")[0].split("/")[-1]
-                path = os.path.join(experiment_directory, ws.meshes_dir, mesh_name)
+                mesh_class_id = sdf_dataset.npyfiles[index].split(".npz")[0].split(os.sep)[-2]
+                mesh_shape_id = sdf_dataset.npyfiles[index].split(".npz")[0].split(os.sep)[-1]
+                save_name = mesh_class_id + "_" + mesh_shape_id
+                path = os.path.join(experiment_directory, ws.tb_logs_train_reconstructions, save_name)
                 if not os.path.exists(path):
                     os.makedirs(path)
-                filename = os.path.join(path, f"train_mesh_epoch={epoch:03d}")
-                create_mesh(decoder, lat_vec, filename)
+
+                start = time.time()
+                with torch.no_grad():
+                    train_mesh = mesh.create_mesh(
+                        decoder, 
+                        lat_vec, 
+                        N=256, 
+                        max_batch=int(2 ** 18), 
+                        filename=os.path.join(path, f"train_mesh_epoch={epoch:03d}") if do_save_mesh else None,
+                        return_trimesh=True
+                    )
+                logging.debug("Total time to create training mesh: {}".format(time.time() - start))
+
+                if do_eval_train:
+                    gt_mesh_path = f"/mnt/hdd/ShapeNetCore.v2/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
+                    chamfer_dist = metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=train_mesh, metric="chamfer")
+                    summary_writer.add_scalar("Chamfer Dist", chamfer_dist, epoch)
+
+            # Test-set evaluation: Reconstruct latent and mesh from GT sdf values and compute metrics.
+            # TODO
             
         summary_writer.flush()    
 
-    # log hparams to tensor board
+    # Log hparams to tensor board.
     writer_hparams = {k: (torch.tensor(v) if type(v) == list else v) for k, v in specs["NetworkSpecs"].items()}
     summary_writer.add_hparams(writer_hparams, {"TrainLoss":min(loss_log)}, run_name='.')
     summary_writer.flush()    

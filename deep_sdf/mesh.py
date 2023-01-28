@@ -13,7 +13,7 @@ import trimesh
 import deep_sdf.utils
 
 
-def create_mesh(decoder, latent_vec, filename=None, N=256, max_batch=32 ** 3, offset=None, scale=None) -> Optional[trimesh.Trimesh]:
+def create_mesh(decoder, latent_vec, filename=None, N=256, max_batch=32 ** 3, offset=None, scale=None, return_trimesh=False) -> Optional[trimesh.Trimesh]:
     start = time.time()
     ply_filename = filename
 
@@ -70,7 +70,7 @@ def create_mesh(decoder, latent_vec, filename=None, N=256, max_batch=32 ** 3, of
             offset,
             scale,
         )
-    else:
+    if not ply_filename or return_trimesh:
         trimesh.Trimesh()
         verts, faces, normals, values = skimage.measure.marching_cubes(
             sdf_values.data.cpu().numpy(), level=0.0, spacing=[voxel_size] * 3, method="lewiner"

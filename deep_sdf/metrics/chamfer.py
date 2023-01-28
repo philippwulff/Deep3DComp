@@ -24,16 +24,7 @@ def compute_trimesh_chamfer(gt_points, gen_mesh, offset, scale, num_mesh_samples
     return compute_chamfer(gen_points_sampled, gt_points_np)
 
 
-def compute_metric(gt_mesh, gen_mesh, num_mesh_samples=30000, metric="chamfer"):
-    gen_points_sampled = trimesh.sample.sample_surface(gen_mesh, num_mesh_samples)[0]
-    gt_points_sampled = trimesh.sample.sample_surface(gt_mesh, num_mesh_samples)[0]
-    if metric == "chamfer":
-        return compute_chamfer(gen_points_sampled, gt_points_sampled)
-    else:
-        return NotImplementedError(f"Chosen metric '{metric}' does not exist.")
-
-
-def compute_chamfer(gen_points_sampled, gt_points_sampled):
+def compute_chamfer(gen_points_sampled, gt_points_sampled) -> float:
     """This function computes a symmetric chamfer distance, i.e. the sum of both chamfers.
 
     gen_points_sampled: np.array of points sampled from the genereated mesh surface.
@@ -49,7 +40,7 @@ def compute_chamfer(gen_points_sampled, gt_points_sampled):
     two_distances, two_vertex_ids = gt_points_kd_tree.query(gen_points_sampled)
     gen_to_gt_chamfer = np.mean(np.square(two_distances))
 
-    return gt_to_gen_chamfer + gen_to_gt_chamfer
+    return float(gt_to_gen_chamfer + gen_to_gt_chamfer)
 
 
 def compute_trimesh_iou():
