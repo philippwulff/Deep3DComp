@@ -13,9 +13,10 @@ import json
 import time
 import copy
 import random
+import numpy as np
 
 import deep_sdf
-from deep_sdf import mesh, metrics, lr_scheduling
+from deep_sdf import mesh, metrics, lr_scheduling, plotting, utils
 import deep_sdf.workspace as ws
 import reconstruct
 
@@ -293,11 +294,12 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
     eval_train_scene_idxs = random.sample(range(len(sdf_dataset)), min(eval_train_scene_num, len(sdf_dataset)))
     logging.debug(f"Plotting {eval_train_scene_num} shapes with indices {eval_train_scene_idxs}")
 
-    # Get test evaluation filenames.
+    # Get test evaluation settings.
     with open(test_split_file, "r") as f:
         test_split = json.load(f)
     eval_test_frequency = get_spec_with_default(specs, "EvalTestFrequency", 10)
     eval_test_scene_num = get_spec_with_default(specs, "EvalTestSceneNumber", 100)
+    eval_test_optimization_steps = get_spec_with_default(specs, "EvalTestOptimizationSteps", 2000)
     eval_test_filenames = deep_sdf.data.get_instance_filenames(data_source, test_split)
     eval_test_filenames = random.sample(eval_test_filenames, min(eval_test_scene_num, len(eval_test_filenames)))
 
@@ -398,7 +400,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
     
     for epoch in range(start_epoch, num_epochs + 1):
 
-        start = time.time()
+        epoch_time_start = time.time()
 
         logging.info("epoch {}...".format(epoch))
 
@@ -468,18 +470,17 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             optimizer_all.step()
 
         # LOG EPOCH
-        end = time.time()
 
-        seconds_elapsed = end - start
+        seconds_elapsed = time.time() - epoch_time_start
         timing_log.append(seconds_elapsed)
 
         lr_log.append([schedule.get_learning_rate(epoch) for schedule in lr_schedules])
         summary_writer.add_scalar("Learning Rate/Params", lr_schedules[0].get_learning_rate(epoch), global_step=epoch)
-        summary_writer.add_scalar("Learning Rate/Code", lr_schedules[1].get_learning_rate(epoch), global_step=epoch)
+        summary_writer.add_scalar("Learning Rate/Latent", lr_schedules[1].get_learning_rate(epoch), global_step=epoch)
 
         mlm = get_mean_latent_vector_magnitude(lat_vecs)
         lat_mag_log.append(mlm)
-        summary_writer.add_scalar("Mean Latent Magnitude", mlm, global_step=epoch)
+        summary_writer.add_scalar("Mean Latent Magnitude/train", mlm, global_step=epoch)
 
         append_parameter_magnitudes(param_mag_log, decoder)
 
@@ -502,7 +503,8 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         # EVALUATION 
         if epoch % eval_train_frequency == 0:
             # Training-set evaluation: Reconstruct mesh from learned latent and compute metrics.
-            chamfer_dist_sum = 0
+            chamfer_dists = []
+            eval_train_time_start = time.time()
             for index in eval_train_scene_idxs:
                 lat_vec = lat_vecs(torch.LongTensor([index])).cuda()
                 mesh_class_id = sdf_dataset.npyfiles[index].split(".npz")[0].split(os.sep)[-2]
@@ -526,19 +528,22 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
                 if train_mesh is not None:
                     gt_mesh_path = f"/mnt/hdd/ShapeNetCore.v2/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
-                    chamfer_dist_sum += metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=train_mesh, metric="chamfer")
+                    chamfer_dists.append(metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=train_mesh, metric="chamfer"))
                 
                 del train_mesh, mesh_class_id, mesh_shape_id, save_name, gt_mesh_path
 
-            logging.debug(f"Chamfer distance: {chamfer_dist_sum}.")            
-            summary_writer.add_scalar("Mean Chamfer Dist/train", chamfer_dist_sum/len(eval_train_scene_idxs), epoch)
+            logging.debug(f"Chamfer distance mean: {sum(chamfer_dists)/len(chamfer_dists)} from {chamfer_dists}.")            
+            summary_writer.add_scalar("Mean Chamfer Dist/train", sum(chamfer_dists)/len(chamfer_dists), epoch)
+            summary_writer.add_scalar("Time/train eval per shape (sec)", (time.time()-eval_train_time_start)/len(eval_test_filenames), epoch)
             # End of eval train.
         
         if epoch % eval_test_frequency == 0:
             # Test-set evaluation: Reconstruct latent and mesh from GT sdf values and compute metrics.
             eval_test_time_start = time.time()
-            test_err_sum = 0
-            chamfer_dist_sum = 0
+            test_err_sum = 0.
+            chamfer_dists = []
+            test_loss_hists = []
+            test_latents = []
             for test_fname in eval_test_filenames:
                 mesh_class_id = test_fname.split(".npz")[0].split(os.sep)[-2]
                 mesh_shape_id = test_fname.split(".npz")[0].split(os.sep)[-1]
@@ -552,9 +557,9 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                 test_sdf_samples[1] = test_sdf_samples[1][torch.randperm(test_sdf_samples[1].shape[0])]
 
                 start = time.time()
-                test_err, test_latent = reconstruct.reconstruct(
+                test_loss_hist, test_latent = reconstruct.reconstruct(
                     decoder,
-                    int(2000),
+                    int(eval_test_optimization_steps),
                     latent_size,
                     test_sdf_samples,
                     0.01,  # [emp_mean,emp_var],
@@ -562,9 +567,12 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                     num_samples=8000,
                     lr=5e-3,
                     l2reg=True,
+                    return_loss_hist=True
                 )
                 logging.debug("[Test eval] Total reconstruction time: {}".format(time.time() - start))
-                test_err_sum += test_err
+                test_err_sum += test_loss_hist[-1]
+                test_loss_hists.append(test_loss_hist)
+                test_latents.append(test_latent)
 
                 start = time.time()
                 with torch.no_grad():
@@ -580,18 +588,25 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
                 if test_mesh is not None:
                     gt_mesh_path = f"/mnt/hdd/ShapeNetCore.v2/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
-                    chamfer_dist_sum += metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=test_mesh, metric="chamfer")
+                    chamfer_dists.append(metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=test_mesh, metric="chamfer"))
             
                 del test_sdf_samples
-                del test_latent
                 del test_mesh
 
-            logging.debug(f"Test Chamfer distance: {chamfer_dist_sum}.")
-            summary_writer.add_scalar("Mean Chamfer Dist/test", chamfer_dist_sum/len(eval_test_filenames), epoch)
+            logging.debug(f"Test Chamfer distance mean: {sum(chamfer_dists)/len(chamfer_dists)} from {chamfer_dists}.")            
+            summary_writer.add_scalar("Mean Chamfer Dist/test", sum(chamfer_dists)/len(chamfer_dists), epoch)
             summary_writer.add_scalar("Loss/test", test_err_sum/len(eval_test_filenames), epoch)
-            summary_writer.add_scalar("Mean Reconstr Time (sec)", (time.time()-eval_test_time_start)/len(eval_test_filenames), epoch)
+            mlm = torch.mean(torch.norm(torch.cat(test_latents, dim=0), dim=1))
+            summary_writer.add_scalar("Mean Latent Magnitude/test", mlm, global_step=epoch)
+            summary_writer.add_scalar("Time/test eval per shape (sec)", (time.time()-eval_test_time_start)/len(eval_test_filenames), epoch)
+            fig = plotting.plot_train_stats(
+                loss_hists=test_loss_hists, 
+                # psnr_hist=[utils.psnr(np.array(_)) for _ in test_loss_hists],
+            )
+            summary_writer.add_figure("Loss/test optimization curves", fig, epoch)
             # End of eval test.
 
+        summary_writer.add_scalar("Time/epoch (min)", (time.time()-epoch_time_start)/60, epoch)
         summary_writer.flush()    
         # End of epoch.
 

@@ -4,6 +4,8 @@
 import logging
 import torch
 import trimesh
+import numpy as np
+from typing import Union 
 
 
 def add_common_args(arg_parser):
@@ -62,6 +64,15 @@ def decode_sdf(decoder, latent_vector, queries):
 
     return sdf
 
+
+def psnr(mse: Union[torch.Tensor, np.array]) -> Union[torch.Tensor, np.array]:
+    """Peak Signal to Noise Ratio. mse has range [0, 1]"""
+    if isinstance(mse, torch.Tensor):
+        return 20 * torch.log10(1/torch.sqrt(mse))
+    elif isinstance(mse, np.array):
+        return 20 * np.log10(1/np.sqrt(mse))
+    else:
+        raise NotImplementedError
 
 def as_mesh(scene_or_mesh):
     """

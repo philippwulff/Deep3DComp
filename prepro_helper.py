@@ -16,6 +16,7 @@ os.environ["PANGOLIN_WINDOW_URI"] = "headless://"
 def main(data_dir, source_dir, splits_dir, debug=False):
 
     num_threads = psutil.cpu_count() - 4
+    logging.info(f"Using {num_threads} cores.")
 
     all_splits_paths = []
     for fname in os.listdir(splits_dir):
@@ -57,7 +58,7 @@ def main(data_dir, source_dir, splits_dir, debug=False):
 
 if __name__ == "__main__":
 
-    data_dir = "../../shared/deepsdf/data"
+    data_dir = "../../shared/deepsdfcomp/data"
     source_dir = "/mnt/hdd/ShapeNetCore.v2"
     splits_dir = "./examples/splits"
 
