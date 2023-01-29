@@ -15,7 +15,7 @@ os.environ["PANGOLIN_WINDOW_URI"] = "headless://"
 
 def main(data_dir, source_dir, splits_dir, debug=False):
 
-    num_threads = psutil.cpu_count() - 4
+    num_threads = int(psutil.cpu_count() * 3/4)
     logging.info(f"Using {num_threads} cores.")
 
     all_splits_paths = []

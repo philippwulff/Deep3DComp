@@ -2,9 +2,9 @@ import matplotlib.pyplot as plt
 
 
 def plot_train_stats(loss_hists: list, psnr_hist=None, step_hist=None, save_path="") -> plt.figure:
-    fig, ax = plt.subplots(1, 1, figsize=(20, 5))
+    fig, ax = plt.subplots(1, 1, figsize=(5, 4))
     if not step_hist:
-        step_hist = list(range(len(loss_hist)))
+        step_hist = list(range(len(loss_hists[0])))
 
     fig.suptitle(f"Training curves {save_path}")
     for loss_hist in loss_hists:
