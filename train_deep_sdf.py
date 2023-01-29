@@ -182,10 +182,6 @@ def append_parameter_magnitudes(param_mag_log, model):
         param_mag_log[name].append(param.data.norm().item())
 
 
-def get_summary_writer(experiment_dir: str):
-    return SummaryWriter(log_dir=os.path.join(experiment_dir, ws.tb_logs_dir))
-
-
 def main_function(experiment_directory: str, continue_from, batch_split: int):
 
     logging.debug("running experiment " + experiment_directory)
@@ -282,26 +278,6 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
     num_data_loader_threads = get_spec_with_default(specs, "DataLoaderThreads", 1)
     logging.debug("loading data with {} threads".format(num_data_loader_threads))
     
-    # Get train evaluation settings.
-    plot_frequency = get_spec_with_default(specs, "PlotFrequency", 10)
-    num_plots = get_spec_with_default(specs, "PlotNumber", 5)
-    plot_res = get_spec_with_default(specs, "PlotRes", 128)
-    num_plots = min(num_plots, len(sdf_dataset))
-    eval_train_frequency = get_spec_with_default(specs, "EvalTrainFrequency", 10)
-    eval_indices_train = torch.randperm(len(sdf_dataset))[:num_plots].tolist()
-    logging.debug(f"Plotting {num_plots} shapes with indices {eval_indices_train}")
-
-
-    with open(test_split_file, "r") as f:
-        test_split = json.load(f)
-
-    # Get test evaluation filenames.
-    eval_test_frequency = get_spec_with_default(specs, "EvalTestFrequency", 10)
-    eval_test_num = get_spec_with_default(specs, "EvalTestNumber", 5)
-    eval_test_filenames = deep_sdf.data.get_instance_filenames(data_source, test_split)
-    eval_test_filenames = random.sample(eval_test_filenames, min(eval_test_num, len(eval_test_filenames)))
-
-
     sdf_loader = data_utils.DataLoader(
         sdf_dataset,
         batch_size=scene_per_batch,
@@ -309,6 +285,21 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         num_workers=num_data_loader_threads,
         drop_last=True,
     )
+
+    # Get train evaluation settings.
+    eval_grid_res = get_spec_with_default(specs, "EvalGridResolution", 256)
+    eval_train_scene_num = get_spec_with_default(specs, "EvalTrainSceneNumber", 5)
+    eval_train_frequency = get_spec_with_default(specs, "EvalTrainFrequency", 50)
+    eval_train_scene_idxs = random.sample(range(len(sdf_dataset)), min(eval_train_scene_num, len(sdf_dataset)))
+    logging.debug(f"Plotting {eval_train_scene_num} shapes with indices {eval_train_scene_idxs}")
+
+    # Get test evaluation filenames.
+    with open(test_split_file, "r") as f:
+        test_split = json.load(f)
+    eval_test_frequency = get_spec_with_default(specs, "EvalTestFrequency", 10)
+    eval_test_scene_num = get_spec_with_default(specs, "EvalTestSceneNumber", 100)
+    eval_test_filenames = deep_sdf.data.get_instance_filenames(data_source, test_split)
+    eval_test_filenames = random.sample(eval_test_filenames, min(eval_test_scene_num, len(eval_test_filenames)))
 
     logging.debug("torch num_threads: {}".format(torch.get_num_threads()))
 
@@ -344,7 +335,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         }]
     )
 
-    summary_writer = get_summary_writer(experiment_directory)
+    summary_writer = SummaryWriter(log_dir=os.path.join(experiment_directory, ws.tb_logs_dir))
 
     loss_log = []
     lr_log = []
@@ -404,7 +395,6 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             lat_vecs.embedding_dim,
         )
     )
-
     
     for epoch in range(start_epoch, num_epochs + 1):
 
@@ -468,7 +458,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             
                 
             logging.debug("loss = {}".format(batch_loss))
-            summary_writer.add_scalar("1 Loss", batch_loss, global_step=epoch)
+            summary_writer.add_scalar("Loss/train", batch_loss, global_step=epoch)
             loss_log.append(batch_loss)
 
             if grad_clip is not None:
@@ -510,12 +500,10 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             )
 
         # EVALUATION 
-        do_eval_train = epoch % eval_train_frequency == 0
-        do_eval_test = epoch % eval_test_frequency == 0
-        if do_eval_train:
+        if epoch % eval_train_frequency == 0:
             # Training-set evaluation: Reconstruct mesh from learned latent and compute metrics.
             chamfer_dist_sum = 0
-            for index in eval_indices_train:
+            for index in eval_train_scene_idxs:
                 lat_vec = lat_vecs(torch.LongTensor([index])).cuda()
                 mesh_class_id = sdf_dataset.npyfiles[index].split(".npz")[0].split(os.sep)[-2]
                 mesh_shape_id = sdf_dataset.npyfiles[index].split(".npz")[0].split(os.sep)[-1]
@@ -529,25 +517,26 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                     train_mesh = mesh.create_mesh(
                         decoder, 
                         lat_vec, 
-                        N=256, 
+                        N=eval_grid_res, 
                         max_batch=int(2 ** 18), 
                         filename=os.path.join(path, f"epoch={epoch}"),
                         return_trimesh=True,
                     )
                 logging.debug("[Train eval] Total time to create training mesh: {}".format(time.time() - start))
 
-                if do_eval_train and train_mesh is not None:
+                if train_mesh is not None:
                     gt_mesh_path = f"/mnt/hdd/ShapeNetCore.v2/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
                     chamfer_dist_sum += metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=train_mesh, metric="chamfer")
                 
                 del train_mesh, mesh_class_id, mesh_shape_id, save_name, gt_mesh_path
 
             logging.debug(f"Chamfer distance: {chamfer_dist_sum}.")            
-            summary_writer.add_scalar("Train Chamfer Dist Mean", chamfer_dist_sum/len(eval_indices_train), epoch)
+            summary_writer.add_scalar("Mean Chamfer Dist/train", chamfer_dist_sum/len(eval_train_scene_idxs), epoch)
             # End of eval train.
         
-        if do_eval_test:
+        if epoch % eval_test_frequency == 0:
             # Test-set evaluation: Reconstruct latent and mesh from GT sdf values and compute metrics.
+            eval_test_time_start = time.time()
             test_err_sum = 0
             chamfer_dist_sum = 0
             for test_fname in eval_test_filenames:
@@ -582,14 +571,14 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                     test_mesh = mesh.create_mesh(
                         decoder, 
                         test_latent, 
-                        N=256, 
+                        N=eval_grid_res, 
                         max_batch=int(2 ** 18), 
                         filename=os.path.join(path, f"epoch={epoch}"),
                         return_trimesh=True,
                     )
                 logging.debug("[Test eval] Total time to create test mesh: {}".format(time.time() - start))
 
-                if do_eval_test and test_mesh is not None:
+                if test_mesh is not None:
                     gt_mesh_path = f"/mnt/hdd/ShapeNetCore.v2/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
                     chamfer_dist_sum += metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=test_mesh, metric="chamfer")
             
@@ -598,18 +587,20 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                 del test_mesh
 
             logging.debug(f"Test Chamfer distance: {chamfer_dist_sum}.")
-            summary_writer.add_scalar("Test Chamfer Dist Mean", chamfer_dist_sum/len(eval_test_filenames), epoch)
-            summary_writer.add_scalar("Test Error Mean", test_err_sum/len(eval_test_filenames), epoch)
+            summary_writer.add_scalar("Mean Chamfer Dist/test", chamfer_dist_sum/len(eval_test_filenames), epoch)
+            summary_writer.add_scalar("Loss/test", test_err_sum/len(eval_test_filenames), epoch)
+            summary_writer.add_scalar("Mean Reconstr Time (sec)", (time.time()-eval_test_time_start)/len(eval_test_filenames), epoch)
             # End of eval test.
 
         summary_writer.flush()    
         # End of epoch.
 
-    # Log hparams to tensor board.
+    # Log hparams to TensorBoard.
     writer_hparams = {k: (torch.tensor(v) if type(v) == list else v) for k, v in specs["NetworkSpecs"].items()}
-    summary_writer.add_hparams(writer_hparams, {"TrainLoss":min(loss_log)}, run_name='.')
+    summary_writer.add_hparams(writer_hparams, {"BestTrainLoss":min(loss_log)}, run_name=str(specs["Description"]))
     summary_writer.flush()    
     summary_writer.close()
+    # End of training.
 
 if __name__ == "__main__":
 
