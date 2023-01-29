@@ -11,85 +11,15 @@ import logging
 import math
 import json
 import time
+import copy
+import random
 
 import deep_sdf
-from deep_sdf import mesh, metrics
+from deep_sdf import mesh, metrics, lr_scheduling
 import deep_sdf.workspace as ws
+import reconstruct
 
 from torch.utils.tensorboard import SummaryWriter
-
-
-class LearningRateSchedule:
-    def get_learning_rate(self, epoch):
-        pass
-
-
-class ConstantLearningRateSchedule(LearningRateSchedule):
-    def __init__(self, value):
-        self.value = value
-
-    def get_learning_rate(self, epoch):
-        return self.value
-
-
-class StepLearningRateSchedule(LearningRateSchedule):
-    def __init__(self, initial, interval, factor):
-        self.initial = initial
-        self.interval = interval
-        self.factor = factor
-
-    def get_learning_rate(self, epoch):
-
-        return self.initial * (self.factor ** (epoch // self.interval))
-
-
-class WarmupLearningRateSchedule(LearningRateSchedule):
-    def __init__(self, initial, warmed_up, length):
-        self.initial = initial
-        self.warmed_up = warmed_up
-        self.length = length
-
-    def get_learning_rate(self, epoch):
-        if epoch > self.length:
-            return self.warmed_up
-        return self.initial + (self.warmed_up - self.initial) * epoch / self.length
-
-
-def get_learning_rate_schedules(specs):
-
-    schedule_specs = specs["LearningRateSchedule"]
-
-    schedules = []
-
-    for schedule_specs in schedule_specs:
-
-        if schedule_specs["Type"] == "Step":
-            schedules.append(
-                StepLearningRateSchedule(
-                    schedule_specs["Initial"],
-                    schedule_specs["Interval"],
-                    schedule_specs["Factor"],
-                )
-            )
-        elif schedule_specs["Type"] == "Warmup":
-            schedules.append(
-                WarmupLearningRateSchedule(
-                    schedule_specs["Initial"],
-                    schedule_specs["Final"],
-                    schedule_specs["Length"],
-                )
-            )
-        elif schedule_specs["Type"] == "Constant":
-            schedules.append(ConstantLearningRateSchedule(schedule_specs["Value"]))
-
-        else:
-            raise Exception(
-                'no known learning rate schedule of type "{}"'.format(
-                    schedule_specs["Type"]
-                )
-            )
-
-    return schedules
 
 
 def save_model(experiment_directory, filename, decoder, epoch):
@@ -266,6 +196,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
     data_source = specs["DataSource"]
     train_split_file = specs["TrainSplit"]
+    test_split_file = specs["TestSplit"]
 
     arch = __import__("networks." + specs["NetworkArch"], fromlist=["Decoder"])
 
@@ -285,7 +216,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         checkpoints.append(checkpoint)
     checkpoints.sort()
 
-    lr_schedules = get_learning_rate_schedules(specs)
+    lr_schedules = lr_scheduling.get_learning_rate_schedules(specs)
 
     grad_clip = get_spec_with_default(specs, "GradientClipNorm", None)
     if grad_clip is not None:
@@ -343,7 +274,6 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
     
     with open(train_split_file, "r") as f:
         train_split = json.load(f)
-        # TODO get list of synsets and shape ids
 
     sdf_dataset = deep_sdf.data.SDFSamples(
         data_source, train_split, num_samp_per_scene, load_ram=False
@@ -352,6 +282,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
     num_data_loader_threads = get_spec_with_default(specs, "DataLoaderThreads", 1)
     logging.debug("loading data with {} threads".format(num_data_loader_threads))
     
+    # Get train evaluation settings.
     plot_frequency = get_spec_with_default(specs, "PlotFrequency", 10)
     num_plots = get_spec_with_default(specs, "PlotNumber", 5)
     plot_res = get_spec_with_default(specs, "PlotRes", 128)
@@ -359,7 +290,17 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
     eval_train_frequency = get_spec_with_default(specs, "EvalTrainFrequency", 10)
     eval_indices_train = torch.randperm(len(sdf_dataset))[:num_plots].tolist()
     logging.debug(f"Plotting {num_plots} shapes with indices {eval_indices_train}")
+
+
+    with open(test_split_file, "r") as f:
+        test_split = json.load(f)
+
+    # Get test evaluation filenames.
     eval_test_frequency = get_spec_with_default(specs, "EvalTestFrequency", 10)
+    eval_test_num = get_spec_with_default(specs, "EvalTestNumber", 5)
+    eval_test_filenames = deep_sdf.data.get_instance_filenames(data_source, test_split)
+    eval_test_filenames = random.sample(eval_test_filenames, min(eval_test_num, len(eval_test_filenames)))
+
 
     sdf_loader = data_utils.DataLoader(
         sdf_dataset,
@@ -393,16 +334,14 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
     loss_l1 = torch.nn.L1Loss(reduction="sum")
 
     optimizer_all = torch.optim.Adam(
-        [
-            {
-                "params": decoder.parameters(),
-                "lr": lr_schedules[0].get_learning_rate(0),
-            },
-            {
-                "params": lat_vecs.parameters(),
-                "lr": lr_schedules[1].get_learning_rate(0),
-            },
-        ]
+        [{
+            "params": decoder.parameters(),
+            "lr": lr_schedules[0].get_learning_rate(0),
+        },
+        {
+            "params": lat_vecs.parameters(),
+            "lr": lr_schedules[1].get_learning_rate(0),
+        }]
     )
 
     summary_writer = get_summary_writer(experiment_directory)
@@ -473,6 +412,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
         logging.info("epoch {}...".format(epoch))
 
+        # Required because evaluation puts the decoder into 'eval' mode.
         decoder.train()
 
         adjust_learning_rate(lr_schedules, optimizer_all, epoch)
@@ -568,12 +508,13 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                 param_mag_log,
                 epoch,
             )
-            
-        do_save_mesh = epoch % plot_frequency == 0
+
+        # EVALUATION 
         do_eval_train = epoch % eval_train_frequency == 0
         do_eval_test = epoch % eval_test_frequency == 0
-        if any([do_save_mesh, do_eval_train, do_eval_test]):
+        if do_eval_train:
             # Training-set evaluation: Reconstruct mesh from learned latent and compute metrics.
+            chamfer_dist_sum = 0
             for index in eval_indices_train:
                 lat_vec = lat_vecs(torch.LongTensor([index])).cuda()
                 mesh_class_id = sdf_dataset.npyfiles[index].split(".npz")[0].split(os.sep)[-2]
@@ -590,21 +531,79 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                         lat_vec, 
                         N=256, 
                         max_batch=int(2 ** 18), 
-                        filename=os.path.join(path, f"train_mesh_epoch={epoch:03d}") if do_save_mesh else None,
-                        return_trimesh=True
+                        filename=os.path.join(path, f"epoch={epoch}"),
+                        return_trimesh=True,
                     )
-                logging.debug("Total time to create training mesh: {}".format(time.time() - start))
+                logging.debug("[Train eval] Total time to create training mesh: {}".format(time.time() - start))
 
                 if do_eval_train and train_mesh is not None:
                     gt_mesh_path = f"/mnt/hdd/ShapeNetCore.v2/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
-                    chamfer_dist = metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=train_mesh, metric="chamfer")
-                    logging.debug(f"Chamfer distance: {chamfer_dist}.")
-                    summary_writer.add_scalar("Chamfer Dist", chamfer_dist, epoch)
+                    chamfer_dist_sum += metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=train_mesh, metric="chamfer")
+                
+                del train_mesh, mesh_class_id, mesh_shape_id, save_name, gt_mesh_path
 
+            logging.debug(f"Chamfer distance: {chamfer_dist_sum}.")            
+            summary_writer.add_scalar("Train Chamfer Dist Mean", chamfer_dist_sum/len(eval_indices_train), epoch)
+            # End of eval train.
+        
+        if do_eval_test:
             # Test-set evaluation: Reconstruct latent and mesh from GT sdf values and compute metrics.
-            # TODO
+            test_err_sum = 0
+            chamfer_dist_sum = 0
+            for test_fname in eval_test_filenames:
+                mesh_class_id = test_fname.split(".npz")[0].split(os.sep)[-2]
+                mesh_shape_id = test_fname.split(".npz")[0].split(os.sep)[-1]
+                save_name = mesh_class_id + "_" + mesh_shape_id
+                path = os.path.join(experiment_directory, ws.tb_logs_dir, ws.tb_logs_test_reconstructions, save_name)
+                if not os.path.exists(path):
+                    os.makedirs(path)
+                test_fpath = os.path.join(data_source, ws.sdf_samples_subdir, test_fname)
+                test_sdf_samples = deep_sdf.data.read_sdf_samples_into_ram(test_fpath)
+                test_sdf_samples[0] = test_sdf_samples[0][torch.randperm(test_sdf_samples[0].shape[0])]
+                test_sdf_samples[1] = test_sdf_samples[1][torch.randperm(test_sdf_samples[1].shape[0])]
+
+                start = time.time()
+                test_err, test_latent = reconstruct.reconstruct(
+                    decoder,
+                    int(2000),
+                    latent_size,
+                    test_sdf_samples,
+                    0.01,  # [emp_mean,emp_var],
+                    0.1,
+                    num_samples=8000,
+                    lr=5e-3,
+                    l2reg=True,
+                )
+                logging.debug("[Test eval] Total reconstruction time: {}".format(time.time() - start))
+                test_err_sum += test_err
+
+                start = time.time()
+                with torch.no_grad():
+                    test_mesh = mesh.create_mesh(
+                        decoder, 
+                        test_latent, 
+                        N=256, 
+                        max_batch=int(2 ** 18), 
+                        filename=os.path.join(path, f"epoch={epoch}"),
+                        return_trimesh=True,
+                    )
+                logging.debug("[Test eval] Total time to create test mesh: {}".format(time.time() - start))
+
+                if do_eval_test and test_mesh is not None:
+                    gt_mesh_path = f"/mnt/hdd/ShapeNetCore.v2/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
+                    chamfer_dist_sum += metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=test_mesh, metric="chamfer")
             
+                del test_sdf_samples
+                del test_latent
+                del test_mesh
+
+            logging.debug(f"Test Chamfer distance: {chamfer_dist_sum}.")
+            summary_writer.add_scalar("Test Chamfer Dist Mean", chamfer_dist_sum/len(eval_test_filenames), epoch)
+            summary_writer.add_scalar("Test Error Mean", test_err_sum/len(eval_test_filenames), epoch)
+            # End of eval test.
+
         summary_writer.flush()    
+        # End of epoch.
 
     # Log hparams to tensor board.
     writer_hparams = {k: (torch.tensor(v) if type(v) == list else v) for k, v in specs["NetworkSpecs"].items()}
