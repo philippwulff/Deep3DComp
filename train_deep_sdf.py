@@ -11,85 +11,16 @@ import logging
 import math
 import json
 import time
+import copy
+import random
+import numpy as np
 
 import deep_sdf
-from deep_sdf.mesh import create_mesh
+from deep_sdf import mesh, metrics, lr_scheduling, plotting, utils
 import deep_sdf.workspace as ws
+import reconstruct
 
 from torch.utils.tensorboard import SummaryWriter
-
-
-class LearningRateSchedule:
-    def get_learning_rate(self, epoch):
-        pass
-
-
-class ConstantLearningRateSchedule(LearningRateSchedule):
-    def __init__(self, value):
-        self.value = value
-
-    def get_learning_rate(self, epoch):
-        return self.value
-
-
-class StepLearningRateSchedule(LearningRateSchedule):
-    def __init__(self, initial, interval, factor):
-        self.initial = initial
-        self.interval = interval
-        self.factor = factor
-
-    def get_learning_rate(self, epoch):
-
-        return self.initial * (self.factor ** (epoch // self.interval))
-
-
-class WarmupLearningRateSchedule(LearningRateSchedule):
-    def __init__(self, initial, warmed_up, length):
-        self.initial = initial
-        self.warmed_up = warmed_up
-        self.length = length
-
-    def get_learning_rate(self, epoch):
-        if epoch > self.length:
-            return self.warmed_up
-        return self.initial + (self.warmed_up - self.initial) * epoch / self.length
-
-
-def get_learning_rate_schedules(specs):
-
-    schedule_specs = specs["LearningRateSchedule"]
-
-    schedules = []
-
-    for schedule_specs in schedule_specs:
-
-        if schedule_specs["Type"] == "Step":
-            schedules.append(
-                StepLearningRateSchedule(
-                    schedule_specs["Initial"],
-                    schedule_specs["Interval"],
-                    schedule_specs["Factor"],
-                )
-            )
-        elif schedule_specs["Type"] == "Warmup":
-            schedules.append(
-                WarmupLearningRateSchedule(
-                    schedule_specs["Initial"],
-                    schedule_specs["Final"],
-                    schedule_specs["Length"],
-                )
-            )
-        elif schedule_specs["Type"] == "Constant":
-            schedules.append(ConstantLearningRateSchedule(schedule_specs["Value"]))
-
-        else:
-            raise Exception(
-                'no known learning rate schedule of type "{}"'.format(
-                    schedule_specs["Type"]
-                )
-            )
-
-    return schedules
 
 
 def save_model(experiment_directory, filename, decoder, epoch):
@@ -252,10 +183,6 @@ def append_parameter_magnitudes(param_mag_log, model):
         param_mag_log[name].append(param.data.norm().item())
 
 
-def get_summary_writer(experiment_dir: str):
-    return SummaryWriter(log_dir=os.path.join(experiment_dir, ws.tb_logs_dir))
-
-
 def main_function(experiment_directory: str, continue_from, batch_split: int):
 
     logging.debug("running experiment " + experiment_directory)
@@ -266,6 +193,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
     data_source = specs["DataSource"]
     train_split_file = specs["TrainSplit"]
+    test_split_file = specs["TestSplit"]
 
     arch = __import__("networks." + specs["NetworkArch"], fromlist=["Decoder"])
 
@@ -285,7 +213,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         checkpoints.append(checkpoint)
     checkpoints.sort()
 
-    lr_schedules = get_learning_rate_schedules(specs)
+    lr_schedules = lr_scheduling.get_learning_rate_schedules(specs)
 
     grad_clip = get_spec_with_default(specs, "GradientClipNorm", None)
     if grad_clip is not None:
@@ -351,13 +279,6 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
     num_data_loader_threads = get_spec_with_default(specs, "DataLoaderThreads", 1)
     logging.debug("loading data with {} threads".format(num_data_loader_threads))
     
-    plot_frequency = get_spec_with_default(specs, "PlotFrequency", 10)
-    num_plots = get_spec_with_default(specs, "PlotNumber", 5)
-    plot_res = get_spec_with_default(specs, "PlotRes", 128)
-    num_plots = min(num_plots, len(sdf_dataset))
-    plot_indices = torch.randperm(len(sdf_dataset))[:num_plots].tolist()
-    logging.debug(f"Plotting {num_plots} shapes with indices {plot_indices}")
-
     sdf_loader = data_utils.DataLoader(
         sdf_dataset,
         batch_size=scene_per_batch,
@@ -365,6 +286,22 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         num_workers=num_data_loader_threads,
         drop_last=True,
     )
+
+    # Get train evaluation settings.
+    eval_grid_res = get_spec_with_default(specs, "EvalGridResolution", 256)
+    eval_train_scene_num = get_spec_with_default(specs, "EvalTrainSceneNumber", 5)
+    eval_train_frequency = get_spec_with_default(specs, "EvalTrainFrequency", 50)
+    eval_train_scene_idxs = random.sample(range(len(sdf_dataset)), min(eval_train_scene_num, len(sdf_dataset)))
+    logging.debug(f"Plotting {eval_train_scene_num} shapes with indices {eval_train_scene_idxs}")
+
+    # Get test evaluation settings.
+    with open(test_split_file, "r") as f:
+        test_split = json.load(f)
+    eval_test_frequency = get_spec_with_default(specs, "EvalTestFrequency", 10)
+    eval_test_scene_num = get_spec_with_default(specs, "EvalTestSceneNumber", 100)
+    eval_test_optimization_steps = get_spec_with_default(specs, "EvalTestOptimizationSteps", 2000)
+    eval_test_filenames = deep_sdf.data.get_instance_filenames(data_source, test_split)
+    eval_test_filenames = random.sample(eval_test_filenames, min(eval_test_scene_num, len(eval_test_filenames)))
 
     logging.debug("torch num_threads: {}".format(torch.get_num_threads()))
 
@@ -390,19 +327,17 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
     loss_l1 = torch.nn.L1Loss(reduction="sum")
 
     optimizer_all = torch.optim.Adam(
-        [
-            {
-                "params": decoder.parameters(),
-                "lr": lr_schedules[0].get_learning_rate(0),
-            },
-            {
-                "params": lat_vecs.parameters(),
-                "lr": lr_schedules[1].get_learning_rate(0),
-            },
-        ]
+        [{
+            "params": decoder.parameters(),
+            "lr": lr_schedules[0].get_learning_rate(0),
+        },
+        {
+            "params": lat_vecs.parameters(),
+            "lr": lr_schedules[1].get_learning_rate(0),
+        }]
     )
 
-    summary_writer = get_summary_writer(experiment_directory)
+    summary_writer = SummaryWriter(log_dir=os.path.join(experiment_directory, ws.tb_logs_dir))
 
     loss_log = []
     lr_log = []
@@ -462,14 +397,14 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             lat_vecs.embedding_dim,
         )
     )
-
     
     for epoch in range(start_epoch, num_epochs + 1):
 
-        start = time.time()
+        epoch_time_start = time.time()
 
         logging.info("epoch {}...".format(epoch))
 
+        # Required because evaluation puts the decoder into 'eval' mode.
         decoder.train()
 
         adjust_learning_rate(lr_schedules, optimizer_all, epoch)
@@ -525,7 +460,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             
                 
             logging.debug("loss = {}".format(batch_loss))
-            summary_writer.add_scalar("1 Loss", batch_loss, global_step=epoch)
+            summary_writer.add_scalar("Loss/train", batch_loss, global_step=epoch)
             loss_log.append(batch_loss)
 
             if grad_clip is not None:
@@ -534,18 +469,18 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
             optimizer_all.step()
 
-        end = time.time()
+        # LOG EPOCH
 
-        seconds_elapsed = end - start
+        seconds_elapsed = time.time() - epoch_time_start
         timing_log.append(seconds_elapsed)
 
         lr_log.append([schedule.get_learning_rate(epoch) for schedule in lr_schedules])
         summary_writer.add_scalar("Learning Rate/Params", lr_schedules[0].get_learning_rate(epoch), global_step=epoch)
-        summary_writer.add_scalar("Learning Rate/Code", lr_schedules[1].get_learning_rate(epoch), global_step=epoch)
+        summary_writer.add_scalar("Learning Rate/Latent", lr_schedules[1].get_learning_rate(epoch), global_step=epoch)
 
         mlm = get_mean_latent_vector_magnitude(lat_vecs)
         lat_mag_log.append(mlm)
-        summary_writer.add_scalar("Mean Latent Magnitude", mlm, global_step=epoch)
+        summary_writer.add_scalar("Mean Latent Magnitude/train", mlm, global_step=epoch)
 
         append_parameter_magnitudes(param_mag_log, decoder)
 
@@ -564,24 +499,123 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                 param_mag_log,
                 epoch,
             )
-            
-        if epoch % plot_frequency == 0:
-            for index in plot_indices:
+
+        # EVALUATION 
+        if epoch % eval_train_frequency == 0:
+            # Training-set evaluation: Reconstruct mesh from learned latent and compute metrics.
+            chamfer_dists = []
+            eval_train_time_start = time.time()
+            for index in eval_train_scene_idxs:
                 lat_vec = lat_vecs(torch.LongTensor([index])).cuda()
-                mesh_name = sdf_dataset.npyfiles[index].split(".npz")[0].split("/")[-1]
-                path = os.path.join(experiment_directory, ws.meshes_dir, mesh_name)
+                mesh_class_id = sdf_dataset.npyfiles[index].split(".npz")[0].split(os.sep)[-2]
+                mesh_shape_id = sdf_dataset.npyfiles[index].split(".npz")[0].split(os.sep)[-1]
+                save_name = mesh_class_id + "_" + mesh_shape_id
+                path = os.path.join(experiment_directory, ws.tb_logs_dir, ws.tb_logs_train_reconstructions, save_name)
                 if not os.path.exists(path):
                     os.makedirs(path)
-                filename = os.path.join(path, f"train_mesh_epoch={epoch:03d}")
-                create_mesh(decoder, lat_vec, filename)
-            
-        summary_writer.flush()    
 
-    # log hparams to tensor board
-    writer_hparams = {k: (str(v) if type(v) == list else v) for k, v in specs["NetworkSpecs"].items()}
-    summary_writer.add_hparams(writer_hparams, {"TrainLoss":min(loss_log)}, run_name='.')
+                start = time.time()
+                with torch.no_grad():
+                    train_mesh = mesh.create_mesh(
+                        decoder, 
+                        lat_vec, 
+                        N=eval_grid_res, 
+                        max_batch=int(2 ** 18), 
+                        filename=os.path.join(path, f"epoch={epoch}"),
+                        return_trimesh=True,
+                    )
+                logging.debug("[Train eval] Total time to create training mesh: {}".format(time.time() - start))
+
+                if train_mesh is not None:
+                    gt_mesh_path = f"/mnt/hdd/ShapeNetCore.v2/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
+                    chamfer_dists.append(metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=train_mesh, metric="chamfer"))
+                
+                del train_mesh, mesh_class_id, mesh_shape_id, save_name, gt_mesh_path
+
+            logging.debug(f"Chamfer distance mean: {sum(chamfer_dists)/len(chamfer_dists)} from {chamfer_dists}.")            
+            summary_writer.add_scalar("Mean Chamfer Dist/train", sum(chamfer_dists)/len(chamfer_dists), epoch)
+            summary_writer.add_scalar("Time/train eval per shape (sec)", (time.time()-eval_train_time_start)/len(eval_test_filenames), epoch)
+            # End of eval train.
+        
+        if epoch % eval_test_frequency == 0:
+            # Test-set evaluation: Reconstruct latent and mesh from GT sdf values and compute metrics.
+            eval_test_time_start = time.time()
+            test_err_sum = 0.
+            chamfer_dists = []
+            test_loss_hists = []
+            test_latents = []
+            for test_fname in eval_test_filenames:
+                mesh_class_id = test_fname.split(".npz")[0].split(os.sep)[-2]
+                mesh_shape_id = test_fname.split(".npz")[0].split(os.sep)[-1]
+                save_name = mesh_class_id + "_" + mesh_shape_id
+                path = os.path.join(experiment_directory, ws.tb_logs_dir, ws.tb_logs_test_reconstructions, save_name)
+                if not os.path.exists(path):
+                    os.makedirs(path)
+                test_fpath = os.path.join(data_source, ws.sdf_samples_subdir, test_fname)
+                test_sdf_samples = deep_sdf.data.read_sdf_samples_into_ram(test_fpath)
+                test_sdf_samples[0] = test_sdf_samples[0][torch.randperm(test_sdf_samples[0].shape[0])]
+                test_sdf_samples[1] = test_sdf_samples[1][torch.randperm(test_sdf_samples[1].shape[0])]
+
+                start = time.time()
+                test_loss_hist, test_latent = reconstruct.reconstruct(
+                    decoder,
+                    int(eval_test_optimization_steps),
+                    latent_size,
+                    test_sdf_samples,
+                    0.01,  # [emp_mean,emp_var],
+                    0.1,
+                    num_samples=8000,
+                    lr=5e-3,
+                    l2reg=True,
+                    return_loss_hist=True
+                )
+                logging.debug("[Test eval] Total reconstruction time: {}".format(time.time() - start))
+                test_err_sum += test_loss_hist[-1]
+                test_loss_hists.append(test_loss_hist)
+                test_latents.append(test_latent)
+
+                start = time.time()
+                with torch.no_grad():
+                    test_mesh = mesh.create_mesh(
+                        decoder, 
+                        test_latent, 
+                        N=eval_grid_res, 
+                        max_batch=int(2 ** 18), 
+                        filename=os.path.join(path, f"epoch={epoch}"),
+                        return_trimesh=True,
+                    )
+                logging.debug("[Test eval] Total time to create test mesh: {}".format(time.time() - start))
+
+                if test_mesh is not None:
+                    gt_mesh_path = f"/mnt/hdd/ShapeNetCore.v2/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
+                    chamfer_dists.append(metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=test_mesh, metric="chamfer"))
+            
+                del test_sdf_samples
+                del test_mesh
+
+            logging.debug(f"Test Chamfer distance mean: {sum(chamfer_dists)/len(chamfer_dists)} from {chamfer_dists}.")            
+            summary_writer.add_scalar("Mean Chamfer Dist/test", sum(chamfer_dists)/len(chamfer_dists), epoch)
+            summary_writer.add_scalar("Loss/test", test_err_sum/len(eval_test_filenames), epoch)
+            mlm = torch.mean(torch.norm(torch.cat(test_latents, dim=0), dim=1))
+            summary_writer.add_scalar("Mean Latent Magnitude/test", mlm, global_step=epoch)
+            summary_writer.add_scalar("Time/test eval per shape (sec)", (time.time()-eval_test_time_start)/len(eval_test_filenames), epoch)
+            fig = plotting.plot_train_stats(
+                loss_hists=test_loss_hists, 
+                # psnr_hist=[utils.psnr(np.array(_)) for _ in test_loss_hists],
+            )
+            summary_writer.add_figure("Loss/test optimization curves", fig, epoch)
+            # End of eval test.
+
+        summary_writer.add_scalar("Time/epoch (min)", (time.time()-epoch_time_start)/60, epoch)
+        summary_writer.flush()    
+        # End of epoch.
+
+    # Log hparams to TensorBoard.
+    writer_hparams = {k: (torch.tensor(v) if type(v) == list else v) for k, v in specs["NetworkSpecs"].items()}
+    summary_writer.add_hparams(writer_hparams, {"BestTrainLoss":min(loss_log)}, run_name=str(specs["Description"]))
     summary_writer.flush()    
     summary_writer.close()
+    # End of training.
 
 if __name__ == "__main__":
 

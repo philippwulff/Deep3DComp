@@ -7,13 +7,20 @@ import plyfile
 import skimage.measure
 import time
 import torch
+from typing import Optional
+import trimesh
 
-import deep_sdf.utils
+from deep_sdf import utils
 
 
-def create_mesh(
-    decoder, latent_vec, filename, N=256, max_batch=32 ** 3, offset=None, scale=None
-):
+def create_mesh(decoder, latent_vec, filename=None, N=256, max_batch=32 ** 3, offset=None, scale=None, return_trimesh=False) -> Optional[trimesh.Trimesh]:
+    """Creates a mesh given the trained decoder and latent code by
+    1. Sampling xyz query points
+    2. Retrieving the SDF predictions
+    3. Running marching cubes to get mesh vertices and faces.
+    
+    With settings N=256 and max_batch=int(2 ** 18) this takes about 10sec on GPU and 100sec on the CPU.
+    """
     start = time.time()
     ply_filename = filename
 
@@ -48,7 +55,7 @@ def create_mesh(
         sample_subset = samples[head : min(head + max_batch, num_samples), 0:3].cuda()
 
         samples[head : min(head + max_batch, num_samples), 3] = (
-            deep_sdf.utils.decode_sdf(decoder, latent_vec, sample_subset)
+            utils.decode_sdf(decoder, latent_vec, sample_subset)
             .squeeze(1)
             .detach()
             .cpu()
@@ -59,9 +66,9 @@ def create_mesh(
     sdf_values = sdf_values.reshape(N, N, N)
 
     end = time.time()
-    print("sampling takes: %f" % (end - start))
+    logging.debug("[create_mesh] sampling takes: %f" % (end - start))
 
-    convert_sdf_samples_to_ply(
+    success = convert_sdf_samples_to_ply(
         sdf_values.data.cpu(),
         voxel_origin,
         voxel_size,
@@ -69,6 +76,8 @@ def create_mesh(
         offset,
         scale,
     )
+    if return_trimesh and success:
+        return utils.as_mesh(trimesh.load(ply_filename + ".ply"))
 
 
 def convert_sdf_samples_to_ply(
@@ -78,7 +87,7 @@ def convert_sdf_samples_to_ply(
     ply_filename_out,
     offset=None,
     scale=None,
-):
+) -> bool:
     """
     Convert sdf samples to .ply
 
@@ -96,9 +105,13 @@ def convert_sdf_samples_to_ply(
     # verts, faces, normals, values = skimage.measure.marching_cubes_lewiner(
     #     numpy_3d_sdf_tensor, level=0.0, spacing=[voxel_size] * 3
     # )
-    verts, faces, normals, values = skimage.measure.marching_cubes(
-        numpy_3d_sdf_tensor, level=0.0, spacing=[voxel_size] * 3, method="lewiner"
-    )
+    try:
+        verts, faces, normals, values = skimage.measure.marching_cubes(
+            numpy_3d_sdf_tensor, level=0.0, spacing=[voxel_size] * 3, method="lewiner"
+        )
+    except ValueError as e:
+        logging.error(f"[create_mesh] Caught marching cubes error: {e}.")
+        return False
     # transform from voxel coordinates to camera coordinates
     # note x and y are flipped in the output of marching_cubes
     mesh_points = np.zeros_like(verts)
@@ -131,11 +144,12 @@ def convert_sdf_samples_to_ply(
     el_faces = plyfile.PlyElement.describe(faces_tuple, "face")
 
     ply_data = plyfile.PlyData([el_verts, el_faces])
-    logging.debug("saving mesh to %s" % (ply_filename_out))
+    logging.debug("[create_mesh] saving mesh to %s" % (ply_filename_out))
     ply_data.write(ply_filename_out)
 
     logging.debug(
-        "converting to ply format and writing to file took {} s".format(
+        "[create_mesh] converting to ply format and writing to file took {} s".format(
             time.time() - start_time
         )
     )
+    return True

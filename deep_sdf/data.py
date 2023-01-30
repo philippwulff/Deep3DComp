@@ -10,6 +10,7 @@ import torch
 import torch.utils.data
 
 import deep_sdf.workspace as ws
+from typing import Tuple, List
 
 
 def get_instance_filenames(data_source, split):
@@ -61,11 +62,11 @@ def remove_nans(tensor):
     return tensor[~tensor_nan, :]
 
 
-def read_sdf_samples_into_ram(filename):
+def read_sdf_samples_into_ram(filename) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Returns tuple containing a tensor of positive and a tensor of negative SDF samples."""
     npz = np.load(filename)
     pos_tensor = torch.from_numpy(npz["pos"])
     neg_tensor = torch.from_numpy(npz["neg"])
-
     return [pos_tensor, neg_tensor]
 
 

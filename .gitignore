@@ -8,6 +8,8 @@ data/*
 **/ModelParameters
 **/OptimizerParameters
 **/Reconstructions
+**/TensorBoard
+**/ReconstructionsTrain
 Logs.pth
 
 

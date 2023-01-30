@@ -9,7 +9,7 @@ import random
 import time
 import torch
 
-import deep_sdf
+from deep_sdf import data, utils
 import deep_sdf.workspace as ws
 
 
@@ -23,6 +23,7 @@ def reconstruct(
     num_samples=30000,
     lr=5e-4,
     l2reg=False,
+    return_loss_hist=False,
 ):
     def adjust_learning_rate(
         initial_lr, optimizer, num_iterations, decreased_by, adjust_lr_every
@@ -44,12 +45,13 @@ def reconstruct(
     optimizer = torch.optim.Adam([latent], lr=lr)
 
     loss_num = 0
+    all_losses = []
     loss_l1 = torch.nn.L1Loss()
 
     for e in range(num_iterations):
 
         decoder.eval()
-        sdf_data = deep_sdf.data.unpack_sdf_samples_from_ram(
+        sdf_data = data.unpack_sdf_samples_from_ram(
             test_sdf, num_samples
         ).cuda()
         xyz = sdf_data[:, 0:3]
@@ -84,7 +86,10 @@ def reconstruct(
             logging.debug(e)
             logging.debug(latent.norm())
         loss_num = loss.cpu().data.numpy()
+        all_losses.append(loss_num)
 
+    if return_loss_hist:
+        return all_losses, latent
     return loss_num, latent
 
 
@@ -136,11 +141,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Skip meshes which have already been reconstructed.",
     )
-    deep_sdf.add_common_args(arg_parser)
+    utils.add_common_args(arg_parser)
 
     args = arg_parser.parse_args()
 
-    deep_sdf.configure_logging(args)
+    utils.configure_logging(args)
 
     def empirical_stat(latent_vecs, indices):
         lat_mat = torch.zeros(0).cuda()
@@ -220,7 +225,7 @@ if __name__ == "__main__":
 
         logging.debug("loading {}".format(npz))
 
-        data_sdf = deep_sdf.data.read_sdf_samples_into_ram(full_filename)
+        data_sdf = data.read_sdf_samples_into_ram(full_filename)
 
         for k in range(repeat):
 

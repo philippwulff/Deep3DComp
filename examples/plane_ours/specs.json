@@ -4,6 +4,8 @@
   "DataSource" : "data",
   "TrainSplit" : "examples/splits/sv2_planes_train_single.json",
   "TestSplit" : "examples/splits/sv2_planes_test_single.json",
+  "EvalTestFrequency": 5,
+  "EvalTrainFrequency": 20,
   "NetworkArch" : "siren_decoder",
   "NetworkSpecs" : {
     "dims" : [ 512, 512, 512, 512, 512, 512, 512, 512 ],
@@ -18,7 +20,7 @@
     "nonlinearity": "relu"
     },
   "CodeLength" : 256,
-  "NumEpochs" : 2001,
+  "NumEpochs" : 3001,
   "SnapshotFrequency" : 1000,
   "AdditionalSnapshots" : [ 100, 500 ],
   "LearningRateSchedule" : [

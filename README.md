@@ -174,6 +174,7 @@ python preprocess_data.py --data_dir data --source [...]/ShapeNetCore.v2/ --name
 
 # train the model
 python train_deep_sdf.py -e examples/sofas
+python train_deep_sdf.py -e ../../shared/deepsdfcomp/experiments/test_planes_pw/
 
 # pre-process the sofa test set (SDF samples)
 python preprocess_data.py --data_dir data --source [...]/ShapeNetCore.v2/ --name ShapeNetV2 --split examples/splits/sv2_sofas_test.json --test --skip
