@@ -20,8 +20,9 @@ def sample_value(values):
         sampled_value = random_between(*values)
     return sampled_value
 
-SEARCH_DIR = "/home/shared/deepsdf/searches/sirenVrelu"
+SEARCH_DIR = "/home/shared/deepsdf/searches/sirenVrelu_100_shapes"
 HPARAM_RANGES_FILE = os.path.join(SEARCH_DIR, "hparam_ranges.json")
+# DEFAULT_SPECS_FILE = "/home/freissmuth/deepsdf/examples/planes/specs.json"
 DEFAULT_SPECS_FILE = "/home/shared/deepsdf/searches/default_specs.json"
 NUM_EXPERIMENTS = 100
 
@@ -87,9 +88,9 @@ for i in range(NUM_EXPERIMENTS):
             if len(v) > 1 and (v[0] != v[1]):
                 searched_hparams[k] = sampled_v
     
-    # TODO remove
-    if specs["NetworkSpecs"]["nonlinearity"] == "relu":
-        continue
+    # # TODO remove
+    # if specs["NetworkSpecs"]["nonlinearity"] == "relu":
+    #     continue
 
     # find exp name (continuous counter and searched hparams)
     exp_number = 0

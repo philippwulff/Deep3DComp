@@ -2,9 +2,8 @@ import torch.nn as nn
 import torch
 import torch.nn.functional as F
 import numpy as np
-# from networks.modules import Sine, Encoding3D
-from modules import Sine, Encoding3D
-
+from networks.modules import Sine, Encoding3D
+# from modules import Sine, Encoding3D
 
 def sine_init(m):
     with torch.no_grad():
