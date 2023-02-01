@@ -537,12 +537,12 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
             logging.debug(f"Chamfer distance mean: {sum(chamfer_dists)/len(chamfer_dists)} from {chamfer_dists}.")            
             summary_writer.add_scalar("Mean Chamfer Dist/train", sum(chamfer_dists)/len(chamfer_dists), epoch)
-            summary_writer.add_scalar("Time/train eval per shape (sec)", (time.time()-eval_train_time_start)/len(eval_test_filenames), epoch)
             fig, percentiles = plotting.plot_dist_violin(np.concatenate(chamfer_dists_all, axis=0))
             summary_writer.add_figure("CD Percentiles/train dists", fig, global_step=epoch)
             for p in [75, 90, 99]:
                 if p in percentiles:
                     summary_writer.add_scalar(f"CD Percentiles/train {p}th", percentiles[p], global_step=epoch)
+            summary_writer.add_scalar("Time/train eval per shape (sec)", (time.time()-eval_train_time_start)/len(eval_test_filenames), epoch)
             # End of eval train.
         
         if epoch % eval_test_frequency == 0:
@@ -611,7 +611,6 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             summary_writer.add_scalar("Loss/test", test_err_sum/len(eval_test_filenames), epoch)
             mlm = torch.mean(torch.norm(torch.cat(test_latents, dim=0), dim=1))
             summary_writer.add_scalar("Mean Latent Magnitude/test", mlm, global_step=epoch)
-            summary_writer.add_scalar("Time/test eval per shape (sec)", (time.time()-eval_test_time_start)/len(eval_test_filenames), epoch)
             fig = plotting.plot_train_stats(loss_hists=test_loss_hists, labels=mesh_label_names)
             summary_writer.add_figure("Loss/test optimization curves", fig, epoch)
             fig, percentiles = plotting.plot_dist_violin(np.concatenate(chamfer_dists_all, axis=0))
@@ -619,7 +618,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             for p in [75, 90, 99]:
                 if p in percentiles:
                     summary_writer.add_scalar(f"CD Percentiles/test {p}th", percentiles[p], global_step=epoch)
-            
+            summary_writer.add_scalar("Time/test eval per shape (sec)", (time.time()-eval_test_time_start)/len(eval_test_filenames), epoch)
             # End of eval test.
 
         summary_writer.add_scalar("Time/epoch (min)", (time.time()-epoch_time_start)/60, epoch)
