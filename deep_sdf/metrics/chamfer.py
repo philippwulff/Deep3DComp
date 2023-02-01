@@ -27,7 +27,7 @@ def compute_trimesh_chamfer(gt_points, gen_mesh, offset, scale, num_mesh_samples
 def compute_chamfer(gen_points_sampled, gt_points_sampled) -> float:
     """This function computes a symmetric chamfer distance, i.e. the sum of both chamfers.
 
-    gen_points_sampled: np.array of points sampled from the genereated mesh surface.
+    gen_points_sampled: np.array of points sampled from the generated mesh surface.
     gt_points_sampled: np.array of points sampled from the GT mesh surface.
     """
     # one direction
@@ -40,7 +40,7 @@ def compute_chamfer(gen_points_sampled, gt_points_sampled) -> float:
     two_distances, two_vertex_ids = gt_points_kd_tree.query(gen_points_sampled)
     gen_to_gt_chamfer = np.mean(np.square(two_distances))
 
-    return float(gt_to_gen_chamfer + gen_to_gt_chamfer)
+    return float(gt_to_gen_chamfer + gen_to_gt_chamfer), np.concatenate((one_distances, two_distances), axis=0)
 
 
 def compute_trimesh_iou():
