@@ -504,6 +504,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         if epoch % eval_train_frequency == 0:
             # Training-set evaluation: Reconstruct mesh from learned latent and compute metrics.
             chamfer_dists = []
+            chamfer_dists_all = []
             eval_train_time_start = time.time()
             for index in eval_train_scene_idxs:
                 lat_vec = lat_vecs(torch.LongTensor([index])).cuda()
@@ -528,13 +529,20 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
                 if train_mesh is not None:
                     gt_mesh_path = f"/mnt/hdd/ShapeNetCore.v2/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
-                    chamfer_dists.append(metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=train_mesh, metric="chamfer"))
+                    cd, cd_all = metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=train_mesh, metric="chamfer")
+                    chamfer_dists.append(cd)
+                    chamfer_dists_all.append(cd_all)
                 
                 del train_mesh, mesh_class_id, mesh_shape_id, save_name, gt_mesh_path
 
             logging.debug(f"Chamfer distance mean: {sum(chamfer_dists)/len(chamfer_dists)} from {chamfer_dists}.")            
             summary_writer.add_scalar("Mean Chamfer Dist/train", sum(chamfer_dists)/len(chamfer_dists), epoch)
             summary_writer.add_scalar("Time/train eval per shape (sec)", (time.time()-eval_train_time_start)/len(eval_test_filenames), epoch)
+            fig, percentiles = plotting.plot_dist_violin(np.concatenate(chamfer_dists_all, axis=0))
+            summary_writer.add_figure("CD Percentiles/train dists", fig, global_step=epoch)
+            for p in [75, 90, 99]:
+                if p in percentiles:
+                    summary_writer.add_scalar(f"CD Percentiles/train {p}th", percentiles[p], global_step=epoch)
             # End of eval train.
         
         if epoch % eval_test_frequency == 0:
@@ -542,11 +550,14 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             eval_test_time_start = time.time()
             test_err_sum = 0.
             chamfer_dists = []
+            chamfer_dists_all = []
             test_loss_hists = []
+            mesh_label_names = []
             test_latents = []
             for test_fname in eval_test_filenames:
                 mesh_class_id = test_fname.split(".npz")[0].split(os.sep)[-2]
                 mesh_shape_id = test_fname.split(".npz")[0].split(os.sep)[-1]
+                mesh_label_names.append(f"{mesh_class_id}_{mesh_shape_id}")
                 save_name = mesh_class_id + "_" + mesh_shape_id
                 path = os.path.join(experiment_directory, ws.tb_logs_dir, ws.tb_logs_test_reconstructions, save_name)
                 if not os.path.exists(path):
@@ -588,8 +599,10 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
                 if test_mesh is not None:
                     gt_mesh_path = f"/mnt/hdd/ShapeNetCore.v2/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
-                    chamfer_dists.append(metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=test_mesh, metric="chamfer"))
-            
+                    cd, cd_all = metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=test_mesh, metric="chamfer")
+                    chamfer_dists.append(cd)
+                    chamfer_dists_all.append(cd_all)
+
                 del test_sdf_samples
                 del test_mesh
 
@@ -599,11 +612,14 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             mlm = torch.mean(torch.norm(torch.cat(test_latents, dim=0), dim=1))
             summary_writer.add_scalar("Mean Latent Magnitude/test", mlm, global_step=epoch)
             summary_writer.add_scalar("Time/test eval per shape (sec)", (time.time()-eval_test_time_start)/len(eval_test_filenames), epoch)
-            fig = plotting.plot_train_stats(
-                loss_hists=test_loss_hists, 
-                # psnr_hist=[utils.psnr(np.array(_)) for _ in test_loss_hists],
-            )
+            fig = plotting.plot_train_stats(loss_hists=test_loss_hists, labels=mesh_label_names)
             summary_writer.add_figure("Loss/test optimization curves", fig, epoch)
+            fig, percentiles = plotting.plot_dist_violin(np.concatenate(chamfer_dists_all, axis=0))
+            summary_writer.add_figure("CD Percentiles/test dists", fig, global_step=epoch)
+            for p in [75, 90, 99]:
+                if p in percentiles:
+                    summary_writer.add_scalar(f"CD Percentiles/test {p}th", percentiles[p], global_step=epoch)
+            
             # End of eval test.
 
         summary_writer.add_scalar("Time/epoch (min)", (time.time()-epoch_time_start)/60, epoch)

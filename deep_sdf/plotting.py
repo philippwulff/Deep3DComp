@@ -1,21 +1,26 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import logging
+import time
+from typing import Union
 
 
-def plot_train_stats(loss_hists: list, psnr_hist=None, step_hist=None, save_path="") -> plt.figure:
+def plot_train_stats(loss_hists: list, psnr_hist=None, step_hist=None, labels=None, save_path="") -> plt.figure:
     fig, ax = plt.subplots(1, 1, figsize=(5, 4))
     if not step_hist:
         step_hist = list(range(len(loss_hists[0])))
 
     fig.suptitle(f"Training curves {save_path}")
-    for loss_hist in loss_hists:
-        ax.plot(step_hist, loss_hist, c="orange", label="Loss")
+    for i, loss_hist in enumerate(loss_hists):
+        label = f"Loss: {labels[i]}" if labels else "Loss"
+        ax.plot(step_hist, loss_hist, c="orange", label=label)
     ax.set_xlabel("Iteration")
     ax.set_ylabel("Loss")
     if psnr_hist:
         ax2 = ax[0].twinx()
         ax2.plot(step_hist, psnr_hist, c="g", label="PSNR")
         ax2.set_ylabel("PSNR")
+    fig.legend()
 
     if save_path:
         fig.savefig(f"{save_path}.jpg", dpi=300, bbox_inches='tight')
@@ -23,36 +28,29 @@ def plot_train_stats(loss_hists: list, psnr_hist=None, step_hist=None, save_path
     return fig
 
 
-def plot_dist_violin(data: np.ndarray) -> plt.figure:
+def plot_dist_violin(data: np.ndarray, percentile_keys: list=[50, 75, 90, 99]) -> Union[plt.figure, dict]:
+    start = time.time()
+    colors = ["lightblue", "green", "orange", "purple", "lime"]
     fig, ax = plt.subplots(1, 1)
     ax.set_ylabel("Distance to NN")
     ax.set_title("Nearest Neighbor Distances (Two-way)")
     ax.set_xticks([])
-
-    def adjacent_values(vals, q1, q3):
-        upper_adjacent_value = q3 + (q3 - q1) * 1.5
-        upper_adjacent_value = np.clip(upper_adjacent_value, q3, vals[-1])
-
-        lower_adjacent_value = q1 - (q3 - q1) * 1.5
-        lower_adjacent_value = np.clip(lower_adjacent_value, vals[0], q1)
-        return lower_adjacent_value, upper_adjacent_value
 
     vplot = ax.violinplot(data, showmeans=False, showextrema=True)
     vplot["cmaxes"].set_edgecolor("darkblue")
     vplot["cmins"].set_edgecolor("darkblue")
     vplot["cbars"].set_edgecolor("darkblue")
 
-    percentile_keys = [50, 75, 90, 99]
     percentiles = np.percentile(data, percentile_keys)
     percentiles = {k: p for k, p in zip(percentile_keys, percentiles)}
 
-    for k, p in percentiles.items():
+    for k, p in reversed(percentiles.items()):
         k = f"{k}th percentile" if k!=50 else "Median"
-        ax.hlines([p], xmin=[0.9], xmax=[1.1], linestyles="--", label=k)
+        ax.hlines([p], xmin=[0.9], xmax=[1.1], linestyles="--", colors=[colors.pop()], label=k)
         ax.annotate(f"{p:.4f}", xy=[1.1, p], va="center")
 
     ax.scatter(1, np.mean(data), marker="o", color="red", s=100, zorder=999, label="Mean (CD)")
-    ax.legend(loc="best")
+    ax.legend(loc="upper left")
 
     for vp in vplot["bodies"]:
         vp.set_facecolor("cornflowerblue")
@@ -74,5 +72,6 @@ def plot_dist_violin(data: np.ndarray) -> plt.figure:
                 new_lines.append(line)
             vp.set_segments(new_lines)
         vp.set_edgecolor("black")
+    logging.debug(f"Plotting all chamfer distances took {time.time()-start}sec")
 
-        return fig
+    return fig, percentiles
