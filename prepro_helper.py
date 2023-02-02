@@ -67,4 +67,4 @@ if __name__ == "__main__":
     args = arg_parser.parse_args()
     deep_sdf.configure_logging(args)
 
-    main(data_dir, source_dir, splits_dir, debug=True)
+    main(data_dir, source_dir, splits_dir, debug=False)
