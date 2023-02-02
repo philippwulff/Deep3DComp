@@ -398,224 +398,234 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         )
     )
     
-    for epoch in range(start_epoch, num_epochs + 1):
+    try:
+        train_chamfer_dists_log = []
+        test_chamfer_dists_log = []
+        for epoch in range(start_epoch, num_epochs + 1):
 
-        epoch_time_start = time.time()
+            epoch_time_start = time.time()
 
-        logging.info("epoch {}...".format(epoch))
+            logging.info("epoch {}...".format(epoch))
 
-        # Required because evaluation puts the decoder into 'eval' mode.
-        decoder.train()
+            # Required because evaluation puts the decoder into 'eval' mode.
+            decoder.train()
 
-        adjust_learning_rate(lr_schedules, optimizer_all, epoch)
-        for sdf_data, indices in sdf_loader:
-            # Process the input data
-            sdf_data = sdf_data.reshape(-1, 4)
+            adjust_learning_rate(lr_schedules, optimizer_all, epoch)
+            for sdf_data, indices in sdf_loader:
+                # Process the input data
+                sdf_data = sdf_data.reshape(-1, 4)
 
-            num_sdf_samples = sdf_data.shape[0]
+                num_sdf_samples = sdf_data.shape[0]
 
-            sdf_data.requires_grad = False
+                sdf_data.requires_grad = False
 
-            xyz = sdf_data[:, 0:3]
-            sdf_gt = sdf_data[:, 3].unsqueeze(1)
-
-            if enforce_minmax:
-                sdf_gt = torch.clamp(sdf_gt, minT, maxT)
-
-            xyz = torch.chunk(xyz, batch_split)
-            indices = torch.chunk(
-                indices.unsqueeze(-1).repeat(1, num_samp_per_scene).view(-1),
-                batch_split,
-            )
-
-            sdf_gt = torch.chunk(sdf_gt, batch_split)
-
-            batch_loss = 0.0
-
-            optimizer_all.zero_grad()
-
-            for i in range(batch_split):
-
-                batch_vecs = lat_vecs(indices[i])
-                input = torch.cat([batch_vecs, xyz[i]], dim=1)
-                
-                # NN optimization
-                pred_sdf = decoder(input)
+                xyz = sdf_data[:, 0:3]
+                sdf_gt = sdf_data[:, 3].unsqueeze(1)
 
                 if enforce_minmax:
-                    pred_sdf = torch.clamp(pred_sdf, minT, maxT)
-                chunk_loss = loss_l1(pred_sdf, sdf_gt[i].cuda()) / num_sdf_samples
+                    sdf_gt = torch.clamp(sdf_gt, minT, maxT)
 
-                if do_code_regularization:
-                    l2_size_loss = torch.sum(torch.norm(batch_vecs, dim=1))
-                    reg_loss = (
-                        code_reg_lambda * min(1, epoch / 100) * l2_size_loss
-                    ) / num_sdf_samples
-
-                    chunk_loss = chunk_loss + reg_loss.cuda()
-
-                chunk_loss.backward()
-
-                batch_loss += chunk_loss.item()
-            
-                
-            logging.debug("loss = {}".format(batch_loss))
-            summary_writer.add_scalar("Loss/train", batch_loss, global_step=epoch)
-            loss_log.append(batch_loss)
-
-            if grad_clip is not None:
-
-                torch.nn.utils.clip_grad_norm_(decoder.parameters(), grad_clip)
-
-            optimizer_all.step()
-
-        # LOG EPOCH
-
-        seconds_elapsed = time.time() - epoch_time_start
-        timing_log.append(seconds_elapsed)
-
-        lr_log.append([schedule.get_learning_rate(epoch) for schedule in lr_schedules])
-        summary_writer.add_scalar("Learning Rate/Params", lr_schedules[0].get_learning_rate(epoch), global_step=epoch)
-        summary_writer.add_scalar("Learning Rate/Latent", lr_schedules[1].get_learning_rate(epoch), global_step=epoch)
-
-        mlm = get_mean_latent_vector_magnitude(lat_vecs)
-        lat_mag_log.append(mlm)
-        summary_writer.add_scalar("Mean Latent Magnitude/train", mlm, global_step=epoch)
-
-        append_parameter_magnitudes(param_mag_log, decoder)
-
-        if epoch in checkpoints:
-            save_checkpoints(epoch)
-
-        if epoch % log_frequency == 0:
-
-            save_latest(epoch)
-            save_logs(
-                experiment_directory,
-                loss_log,
-                lr_log,
-                timing_log,
-                lat_mag_log,
-                param_mag_log,
-                epoch,
-            )
-
-        # EVALUATION 
-        if epoch % eval_train_frequency == 0:
-            # Training-set evaluation: Reconstruct mesh from learned latent and compute metrics.
-            chamfer_dists = []
-            eval_train_time_start = time.time()
-            for index in eval_train_scene_idxs:
-                lat_vec = lat_vecs(torch.LongTensor([index])).cuda()
-                mesh_class_id = sdf_dataset.npyfiles[index].split(".npz")[0].split(os.sep)[-2]
-                mesh_shape_id = sdf_dataset.npyfiles[index].split(".npz")[0].split(os.sep)[-1]
-                save_name = mesh_class_id + "_" + mesh_shape_id
-                path = os.path.join(experiment_directory, ws.tb_logs_dir, ws.tb_logs_train_reconstructions, save_name)
-                if not os.path.exists(path):
-                    os.makedirs(path)
-
-                start = time.time()
-                with torch.no_grad():
-                    train_mesh = mesh.create_mesh(
-                        decoder, 
-                        lat_vec, 
-                        N=eval_grid_res, 
-                        max_batch=int(2 ** 18), 
-                        filename=os.path.join(path, f"epoch={epoch}"),
-                        return_trimesh=True,
-                    )
-                logging.debug("[Train eval] Total time to create training mesh: {}".format(time.time() - start))
-
-                if train_mesh is not None:
-                    gt_mesh_path = f"/mnt/hdd/ShapeNetCore.v2/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
-                    chamfer_dists.append(metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=train_mesh, metric="chamfer"))
-                
-                del train_mesh, mesh_class_id, mesh_shape_id, save_name, gt_mesh_path
-
-            logging.debug(f"Chamfer distance mean: {sum(chamfer_dists)/len(chamfer_dists)} from {chamfer_dists}.")            
-            summary_writer.add_scalar("Mean Chamfer Dist/train", sum(chamfer_dists)/len(chamfer_dists), epoch)
-            summary_writer.add_scalar("Time/train eval per shape (sec)", (time.time()-eval_train_time_start)/len(eval_test_filenames), epoch)
-            # End of eval train.
-        
-        if epoch % eval_test_frequency == 0:
-            # Test-set evaluation: Reconstruct latent and mesh from GT sdf values and compute metrics.
-            eval_test_time_start = time.time()
-            test_err_sum = 0.
-            chamfer_dists = []
-            test_loss_hists = []
-            test_latents = []
-            for test_fname in eval_test_filenames:
-                mesh_class_id = test_fname.split(".npz")[0].split(os.sep)[-2]
-                mesh_shape_id = test_fname.split(".npz")[0].split(os.sep)[-1]
-                save_name = mesh_class_id + "_" + mesh_shape_id
-                path = os.path.join(experiment_directory, ws.tb_logs_dir, ws.tb_logs_test_reconstructions, save_name)
-                if not os.path.exists(path):
-                    os.makedirs(path)
-                test_fpath = os.path.join(data_source, ws.sdf_samples_subdir, test_fname)
-                test_sdf_samples = deep_sdf.data.read_sdf_samples_into_ram(test_fpath)
-                test_sdf_samples[0] = test_sdf_samples[0][torch.randperm(test_sdf_samples[0].shape[0])]
-                test_sdf_samples[1] = test_sdf_samples[1][torch.randperm(test_sdf_samples[1].shape[0])]
-
-                start = time.time()
-                test_loss_hist, test_latent = reconstruct.reconstruct(
-                    decoder,
-                    int(eval_test_optimization_steps),
-                    latent_size,
-                    test_sdf_samples,
-                    0.01,  # [emp_mean,emp_var],
-                    0.1,
-                    num_samples=8000,
-                    lr=5e-3,
-                    l2reg=True,
-                    return_loss_hist=True
+                xyz = torch.chunk(xyz, batch_split)
+                indices = torch.chunk(
+                    indices.unsqueeze(-1).repeat(1, num_samp_per_scene).view(-1),
+                    batch_split,
                 )
-                logging.debug("[Test eval] Total reconstruction time: {}".format(time.time() - start))
-                test_err_sum += test_loss_hist[-1]
-                test_loss_hists.append(test_loss_hist)
-                test_latents.append(test_latent)
 
-                start = time.time()
-                with torch.no_grad():
-                    test_mesh = mesh.create_mesh(
-                        decoder, 
-                        test_latent, 
-                        N=eval_grid_res, 
-                        max_batch=int(2 ** 18), 
-                        filename=os.path.join(path, f"epoch={epoch}"),
-                        return_trimesh=True,
-                    )
-                logging.debug("[Test eval] Total time to create test mesh: {}".format(time.time() - start))
+                sdf_gt = torch.chunk(sdf_gt, batch_split)
 
-                if test_mesh is not None:
-                    gt_mesh_path = f"/mnt/hdd/ShapeNetCore.v2/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
-                    chamfer_dists.append(metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=test_mesh, metric="chamfer"))
+                batch_loss = 0.0
+
+                optimizer_all.zero_grad()
+
+                for i in range(batch_split):
+
+                    batch_vecs = lat_vecs(indices[i])
+                    input = torch.cat([batch_vecs, xyz[i]], dim=1)
+                    
+                    # NN optimization
+                    pred_sdf = decoder(input)
+
+                    if enforce_minmax:
+                        pred_sdf = torch.clamp(pred_sdf, minT, maxT)
+                    chunk_loss = loss_l1(pred_sdf, sdf_gt[i].cuda()) / num_sdf_samples
+
+                    if do_code_regularization:
+                        l2_size_loss = torch.sum(torch.norm(batch_vecs, dim=1))
+                        reg_loss = (
+                            code_reg_lambda * min(1, epoch / 100) * l2_size_loss
+                        ) / num_sdf_samples
+
+                        chunk_loss = chunk_loss + reg_loss.cuda()
+
+                    chunk_loss.backward()
+
+                    batch_loss += chunk_loss.item()
+                
+                    
+                logging.debug("loss = {}".format(batch_loss))
+                summary_writer.add_scalar("Loss/train", batch_loss, global_step=epoch)
+                loss_log.append(batch_loss)
+
+                if grad_clip is not None:
+
+                    torch.nn.utils.clip_grad_norm_(decoder.parameters(), grad_clip)
+
+                optimizer_all.step()
+
+            # LOG EPOCH
+
+            seconds_elapsed = time.time() - epoch_time_start
+            timing_log.append(seconds_elapsed)
+
+            lr_log.append([schedule.get_learning_rate(epoch) for schedule in lr_schedules])
+            summary_writer.add_scalar("Learning Rate/Params", lr_schedules[0].get_learning_rate(epoch), global_step=epoch)
+            summary_writer.add_scalar("Learning Rate/Latent", lr_schedules[1].get_learning_rate(epoch), global_step=epoch)
+
+            mlm = get_mean_latent_vector_magnitude(lat_vecs)
+            lat_mag_log.append(mlm)
+            summary_writer.add_scalar("Mean Latent Magnitude/train", mlm, global_step=epoch)
+
+            append_parameter_magnitudes(param_mag_log, decoder)
+
+            if epoch in checkpoints:
+                save_checkpoints(epoch)
+
+            if epoch % log_frequency == 0:
+
+                save_latest(epoch)
+                save_logs(
+                    experiment_directory,
+                    loss_log,
+                    lr_log,
+                    timing_log,
+                    lat_mag_log,
+                    param_mag_log,
+                    epoch,
+                )
+
+            # EVALUATION 
+            if epoch % eval_train_frequency == 0:
+                # Training-set evaluation: Reconstruct mesh from learned latent and compute metrics.
+                chamfer_dists = []
+                eval_train_time_start = time.time()
+                for index in eval_train_scene_idxs:
+                    lat_vec = lat_vecs(torch.LongTensor([index])).cuda()
+                    mesh_class_id = sdf_dataset.npyfiles[index].split(".npz")[0].split(os.sep)[-2]
+                    mesh_shape_id = sdf_dataset.npyfiles[index].split(".npz")[0].split(os.sep)[-1]
+                    save_name = mesh_class_id + "_" + mesh_shape_id
+                    path = os.path.join(experiment_directory, ws.tb_logs_dir, ws.tb_logs_train_reconstructions, save_name)
+                    if not os.path.exists(path):
+                        os.makedirs(path)
+
+                    start = time.time()
+                    with torch.no_grad():
+                        train_mesh = mesh.create_mesh(
+                            decoder, 
+                            lat_vec, 
+                            N=eval_grid_res, 
+                            max_batch=int(2 ** 18), 
+                            filename=os.path.join(path, f"epoch={epoch}"),
+                            return_trimesh=True,
+                        )
+                    logging.debug("[Train eval] Total time to create training mesh: {}".format(time.time() - start))
+
+                    if train_mesh is not None:
+                        gt_mesh_path = f"/mnt/hdd/ShapeNetCore.v2/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
+                        chamfer_dists.append(metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=train_mesh, metric="chamfer"))
+                    
+                    del train_mesh, mesh_class_id, mesh_shape_id, save_name
+
+                logging.debug(f"Chamfer distance mean: {sum(chamfer_dists)/len(chamfer_dists)} from {chamfer_dists}.")            
+                summary_writer.add_scalar("Mean Chamfer Dist/train", sum(chamfer_dists)/len(chamfer_dists), epoch)
+                summary_writer.add_scalar("Time/train eval per shape (sec)", (time.time()-eval_train_time_start)/len(eval_test_filenames), epoch)
+                train_chamfer_dists_log.append(sum(chamfer_dists)/len(chamfer_dists))
+                # End of eval train.
             
-                del test_sdf_samples
-                del test_mesh
+            if epoch % eval_test_frequency == 0:
+                # Test-set evaluation: Reconstruct latent and mesh from GT sdf values and compute metrics.
+                eval_test_time_start = time.time()
+                test_err_sum = 0.
+                chamfer_dists = []
+                test_loss_hists = []
+                test_latents = []
+                for test_fname in eval_test_filenames:
+                    mesh_class_id = test_fname.split(".npz")[0].split(os.sep)[-2]
+                    mesh_shape_id = test_fname.split(".npz")[0].split(os.sep)[-1]
+                    save_name = mesh_class_id + "_" + mesh_shape_id
+                    path = os.path.join(experiment_directory, ws.tb_logs_dir, ws.tb_logs_test_reconstructions, save_name)
+                    if not os.path.exists(path):
+                        os.makedirs(path)
+                    test_fpath = os.path.join(data_source, ws.sdf_samples_subdir, test_fname)
+                    test_sdf_samples = deep_sdf.data.read_sdf_samples_into_ram(test_fpath)
+                    test_sdf_samples[0] = test_sdf_samples[0][torch.randperm(test_sdf_samples[0].shape[0])]
+                    test_sdf_samples[1] = test_sdf_samples[1][torch.randperm(test_sdf_samples[1].shape[0])]
 
-            logging.debug(f"Test Chamfer distance mean: {sum(chamfer_dists)/len(chamfer_dists)} from {chamfer_dists}.")            
-            summary_writer.add_scalar("Mean Chamfer Dist/test", sum(chamfer_dists)/len(chamfer_dists), epoch)
-            summary_writer.add_scalar("Loss/test", test_err_sum/len(eval_test_filenames), epoch)
-            mlm = torch.mean(torch.norm(torch.cat(test_latents, dim=0), dim=1))
-            summary_writer.add_scalar("Mean Latent Magnitude/test", mlm, global_step=epoch)
-            summary_writer.add_scalar("Time/test eval per shape (sec)", (time.time()-eval_test_time_start)/len(eval_test_filenames), epoch)
-            fig = plotting.plot_train_stats(
-                loss_hists=test_loss_hists, 
-                # psnr_hist=[utils.psnr(np.array(_)) for _ in test_loss_hists],
-            )
-            summary_writer.add_figure("Loss/test optimization curves", fig, epoch)
-            # End of eval test.
+                    start = time.time()
+                    test_loss_hist, test_latent = reconstruct.reconstruct(
+                        decoder,
+                        int(eval_test_optimization_steps),
+                        latent_size,
+                        test_sdf_samples,
+                        0.01,  # [emp_mean,emp_var],
+                        0.1,
+                        num_samples=8000,
+                        lr=5e-3,
+                        l2reg=True,
+                        return_loss_hist=True
+                    )
+                    logging.debug("[Test eval] Total reconstruction time: {}".format(time.time() - start))
+                    test_err_sum += test_loss_hist[-1]
+                    test_loss_hists.append(test_loss_hist)
+                    test_latents.append(test_latent)
 
-        summary_writer.add_scalar("Time/epoch (min)", (time.time()-epoch_time_start)/60, epoch)
+                    start = time.time()
+                    with torch.no_grad():
+                        test_mesh = mesh.create_mesh(
+                            decoder, 
+                            test_latent, 
+                            N=eval_grid_res, 
+                            max_batch=int(2 ** 18), 
+                            filename=os.path.join(path, f"epoch={epoch}"),
+                            return_trimesh=True,
+                        )
+                    logging.debug("[Test eval] Total time to create test mesh: {}".format(time.time() - start))
+
+                    if test_mesh is not None:
+                        gt_mesh_path = f"/mnt/hdd/ShapeNetCore.v2/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
+                        chamfer_dists.append(metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=test_mesh, metric="chamfer"))
+
+                    del test_sdf_samples
+                    del test_mesh
+
+                logging.debug(f"Test Chamfer distance mean: {sum(chamfer_dists)/len(chamfer_dists)} from {chamfer_dists}.")            
+                summary_writer.add_scalar("Mean Chamfer Dist/test", sum(chamfer_dists)/len(chamfer_dists), epoch)
+                summary_writer.add_scalar("Loss/test", test_err_sum/len(eval_test_filenames), epoch)
+                mlm = torch.mean(torch.norm(torch.cat(test_latents, dim=0), dim=1))
+                summary_writer.add_scalar("Mean Latent Magnitude/test", mlm, global_step=epoch)
+                summary_writer.add_scalar("Time/test eval per shape (sec)", (time.time()-eval_test_time_start)/len(eval_test_filenames), epoch)
+                fig = plotting.plot_train_stats(
+                    loss_hists=test_loss_hists, 
+                    # psnr_hist=[utils.psnr(np.array(_)) for _ in test_loss_hists],
+                )
+                summary_writer.add_figure("Loss/test optimization curves", fig, epoch)
+                test_chamfer_dists_log.append(sum(chamfer_dists)/len(chamfer_dists))
+                # End of eval test.
+
+            summary_writer.add_scalar("Time/epoch (min)", (time.time()-epoch_time_start)/60, epoch)
+            summary_writer.flush()    
+            # End of epoch.
+    except KeyboardInterrupt:
+        # Log hparams to TensorBoard.
+        writer_hparams = {k: (str(v) if type(v) == list else v) for k, v in specs["NetworkSpecs"].items()}
+        writer_results = {"BestTrainLoss" : min(loss_log),
+                        "BestTrainCD" : min(train_chamfer_dists_log) if len(train_chamfer_dists_log) else -1,
+                        "BestTestCD" : min(test_chamfer_dists_log) if len(test_chamfer_dists_log) else -1,}
+        summary_writer.add_hparams(writer_hparams, writer_results, run_name='.')
+        # summary_writer.add_hparams(writer_hparams, writer_results, run_name=str(specs["Description"]))
         summary_writer.flush()    
-        # End of epoch.
-
-    # Log hparams to TensorBoard.
-    writer_hparams = {k: (torch.tensor(v) if type(v) == list else v) for k, v in specs["NetworkSpecs"].items()}
-    summary_writer.add_hparams(writer_hparams, {"BestTrainLoss":min(loss_log)}, run_name=str(specs["Description"]))
-    summary_writer.flush()    
-    summary_writer.close()
-    # End of training.
+        summary_writer.close()
+        # End of training.
+        raise KeyboardInterrupt
 
 if __name__ == "__main__":
 
