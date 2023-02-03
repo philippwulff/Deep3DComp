@@ -570,35 +570,35 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                 test_sdf_samples[0] = test_sdf_samples[0][torch.randperm(test_sdf_samples[0].shape[0])]
                 test_sdf_samples[1] = test_sdf_samples[1][torch.randperm(test_sdf_samples[1].shape[0])]
 
-                    start = time.time()
-                    test_loss_hist, test_latent = reconstruct.reconstruct(
-                        decoder,
-                        int(eval_test_optimization_steps),
-                        latent_size,
-                        test_sdf_samples,
-                        0.01,  # [emp_mean,emp_var],
-                        0.1,
-                        num_samples=8000,
-                        lr=5e-3,
-                        l2reg=True,
-                        return_loss_hist=True
-                    )
-                    logging.debug("[Test eval] Total reconstruction time: {}".format(time.time() - start))
-                    test_err_sum += test_loss_hist[-1]
-                    test_loss_hists.append(test_loss_hist)
-                    test_latents.append(test_latent)
+                start = time.time()
+                test_loss_hist, test_latent = reconstruct.reconstruct(
+                    decoder,
+                    int(eval_test_optimization_steps),
+                    latent_size,
+                    test_sdf_samples,
+                    0.01,  # [emp_mean,emp_var],
+                    0.1,
+                    num_samples=8000,
+                    lr=5e-3,
+                    l2reg=True,
+                    return_loss_hist=True
+                )
+                logging.debug("[Test eval] Total reconstruction time: {}".format(time.time() - start))
+                test_err_sum += test_loss_hist[-1]
+                test_loss_hists.append(test_loss_hist)
+                test_latents.append(test_latent)
 
-                    start = time.time()
-                    with torch.no_grad():
-                        test_mesh = mesh.create_mesh(
-                            decoder, 
-                            test_latent, 
-                            N=eval_grid_res, 
-                            max_batch=int(2 ** 18), 
-                            filename=os.path.join(path, f"epoch={epoch}"),
-                            return_trimesh=True,
-                        )
-                    logging.debug("[Test eval] Total time to create test mesh: {}".format(time.time() - start))
+                start = time.time()
+                with torch.no_grad():
+                    test_mesh = mesh.create_mesh(
+                        decoder, 
+                        test_latent, 
+                        N=eval_grid_res, 
+                        max_batch=int(2 ** 18), 
+                        filename=os.path.join(path, f"epoch={epoch}"),
+                        return_trimesh=True,
+                    )
+                logging.debug("[Test eval] Total time to create test mesh: {}".format(time.time() - start))
 
                 if test_mesh is not None:
                     gt_mesh_path = f"/mnt/hdd/ShapeNetCore.v2/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
@@ -628,6 +628,9 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             summary_writer.flush()    
             # End of epoch.
     except KeyboardInterrupt:
+        pass
+        # raise KeyboardInterrupt
+    finally:
         # Log hparams to TensorBoard.
         writer_hparams = {k: (str(v) if type(v) == list else v) for k, v in specs["NetworkSpecs"].items()}
         writer_results = {"BestTrainLoss" : min(loss_log),
@@ -638,7 +641,6 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         summary_writer.flush()    
         summary_writer.close()
         # End of training.
-        raise KeyboardInterrupt
 
 if __name__ == "__main__":
 
