@@ -5,9 +5,6 @@ import numpy as np
 from networks.modules import Sine, Encoding3D
 
 
-
-
-
 def sine_init(m):
     with torch.no_grad():
         if hasattr(m, 'weight'):

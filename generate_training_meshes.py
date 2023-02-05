@@ -33,6 +33,7 @@ def code_to_mesh(experiment_directory, checkpoint, keep_normalized=False):
     saved_model_state = torch.load(
         os.path.join(experiment_directory, ws.model_params_subdir, checkpoint + ".pth")
     )
+    print(saved_model_state["model_state_dict"].keys())
     saved_model_epoch = saved_model_state["epoch"]
 
     decoder.load_state_dict(saved_model_state["model_state_dict"])
