@@ -486,10 +486,11 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             append_parameter_magnitudes(param_mag_log, decoder)
             # Log weights and gradient flow.
             for _name, _param in decoder.named_parameters():
-                _name = _name.strip("module.decoder.")
+                if _name.startswith("module.decoder."):
+                    _name = _name[15:]
                 if "weight" in _name or "bias" in _name: 
-                    summary_writer.add_scalar(f"WeightSum/{_name}", _param.abs().sum(), global_step=epoch)
-                    summary_writer.add_scalar(f"GradSum/{_name}.grad", _param.grad.abs().sum(), global_step=epoch)
+                    summary_writer.add_scalar(f"WeightAbsSum/{_name}", _param.abs().sum(), global_step=epoch)
+                    summary_writer.add_scalar(f"GradAbsSum/{_name}.grad", _param.grad.abs().sum(), global_step=epoch)
             # Save checkpoint.
             if epoch in checkpoints:
                 save_checkpoints(epoch)
