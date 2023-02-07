@@ -174,6 +174,7 @@ python preprocess_data.py --data_dir data --source [...]/ShapeNetCore.v2/ --name
 
 # train the model
 python train_deep_sdf.py -e examples/sofas
+python train_deep_sdf.py -e examples/planes --batch_split 2
 python train_deep_sdf.py -e ../../shared/deepsdfcomp/experiments/test_planes_pw/
 
 # pre-process the sofa test set (SDF samples)
@@ -186,11 +187,13 @@ python preprocess_data.py --data_dir data --source [...]/ShapeNetCore.v2/ --name
 
 # reconstruct meshes from the sofa test split (after 2000 epochs)
 python reconstruct.py -e examples/sofas -c 2000 --split examples/splits/sv2_sofas_test.json -d data --skip
+python reconstruct.py -e examples/planes -c 2000 --split examples/splits/sv2_planes_test.json -d ../../shared/deepsdfcomp/data --skip
 
 python reconstruct.py -e examples/planes_single/ -c 2000 --split examples/splits/sv2_planes_train_single.json -d data --skip
 
 # evaluate the reconstructions
 python evaluate.py -e examples/sofas -c 2000 -d data -s examples/splits/sv2_sofas_test.json 
+python evaluate.py -e examples/planes -c 2000 -d ../../shared/deepsdfcomp/data/ -s examples/splits/sv2_planes_test.json 
 ```
 
 ## Team

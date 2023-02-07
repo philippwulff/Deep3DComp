@@ -289,17 +289,17 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
     # Get train evaluation settings.
     eval_grid_res = get_spec_with_default(specs, "EvalGridResolution", 256)
-    eval_train_scene_num = get_spec_with_default(specs, "EvalTrainSceneNumber", 5)
-    eval_train_frequency = get_spec_with_default(specs, "EvalTrainFrequency", 50)
+    eval_train_scene_num = get_spec_with_default(specs, "EvalTrainSceneNumber", 10)
+    eval_train_frequency = get_spec_with_default(specs, "EvalTrainFrequency", 9999)
     eval_train_scene_idxs = random.sample(range(len(sdf_dataset)), min(eval_train_scene_num, len(sdf_dataset)))
     logging.debug(f"Plotting {eval_train_scene_num} shapes with indices {eval_train_scene_idxs}")
 
     # Get test evaluation settings.
     with open(test_split_file, "r") as f:
         test_split = json.load(f)
-    eval_test_frequency = get_spec_with_default(specs, "EvalTestFrequency", 10)
-    eval_test_scene_num = get_spec_with_default(specs, "EvalTestSceneNumber", 100)
-    eval_test_optimization_steps = get_spec_with_default(specs, "EvalTestOptimizationSteps", 2000)
+    eval_test_frequency = get_spec_with_default(specs, "EvalTestFrequency", 9999)
+    eval_test_scene_num = get_spec_with_default(specs, "EvalTestSceneNumber", 10)
+    eval_test_optimization_steps = get_spec_with_default(specs, "EvalTestOptimizationSteps", 1000)
     eval_test_filenames = deep_sdf.data.get_instance_filenames(data_source, test_split)
     eval_test_filenames = random.sample(eval_test_filenames, min(eval_test_scene_num, len(eval_test_filenames)))
 
@@ -464,26 +464,32 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             loss_log.append(batch_loss)
 
             if grad_clip is not None:
-
                 torch.nn.utils.clip_grad_norm_(decoder.parameters(), grad_clip)
 
             optimizer_all.step()
 
-        # LOG EPOCH
+        # LOGGING.
 
         seconds_elapsed = time.time() - epoch_time_start
         timing_log.append(seconds_elapsed)
 
+        # Log learning rate.
         lr_log.append([schedule.get_learning_rate(epoch) for schedule in lr_schedules])
         summary_writer.add_scalar("Learning Rate/Params", lr_schedules[0].get_learning_rate(epoch), global_step=epoch)
         summary_writer.add_scalar("Learning Rate/Latent", lr_schedules[1].get_learning_rate(epoch), global_step=epoch)
-
+        # Log latent vector length.
         mlm = get_mean_latent_vector_magnitude(lat_vecs)
         lat_mag_log.append(mlm)
         summary_writer.add_scalar("Mean Latent Magnitude/train", mlm, global_step=epoch)
-
         append_parameter_magnitudes(param_mag_log, decoder)
+        # Log weights and gradient flow.
+        for _name, _param in decoder.named_parameters():
+            _name = _name.strip("module.decoder.")
+            if "weight" in _name or "bias" in _name: 
+                summary_writer.add_scalar(f"WeightSum/{_name}", _param.sum(), global_step=epoch)
+                summary_writer.add_scalar(f"GradSum/{_name}.grad", _param.grad.sum(), global_step=epoch)
 
+        # Save checkpoint.
         if epoch in checkpoints:
             save_checkpoints(epoch)
 
@@ -625,9 +631,10 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         summary_writer.flush()    
         # End of epoch.
 
-    # Log hparams to TensorBoard.
+    # Log hparams and graph to TensorBoard.
     writer_hparams = {k: (torch.tensor(v) if type(v) == list else v) for k, v in specs["NetworkSpecs"].items()}
     summary_writer.add_hparams(writer_hparams, {"BestTrainLoss":min(loss_log)}, run_name=str(specs["Description"]))
+    summary_writer.add_graph(decoder, input)        # TODO test if this works
     summary_writer.flush()    
     summary_writer.close()
     # End of training.

@@ -9,7 +9,7 @@ import random
 import time
 import torch
 
-from deep_sdf import data, utils
+from deep_sdf import data, utils, mesh
 import deep_sdf.workspace as ws
 
 
@@ -186,7 +186,7 @@ if __name__ == "__main__":
     with open(args.split_filename, "r") as f:
         split = json.load(f)
 
-    npz_filenames = deep_sdf.data.get_instance_filenames(args.data_source, split)
+    npz_filenames = data.get_instance_filenames(args.data_source, split)
 
     random.shuffle(npz_filenames)
 
@@ -281,7 +281,7 @@ if __name__ == "__main__":
             if not save_latvec_only:
                 start = time.time()
                 with torch.no_grad():
-                    deep_sdf.mesh.create_mesh(
+                    mesh.create_mesh(
                         decoder, latent, mesh_filename, N=256, max_batch=int(2 ** 18)
                     )
                 logging.debug("total time: {}".format(time.time() - start))
