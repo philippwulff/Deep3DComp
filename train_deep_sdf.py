@@ -628,9 +628,9 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                 summary_writer.add_scalar("Time/test eval per shape (sec)", (time.time()-eval_test_time_start)/len(eval_test_filenames), epoch)
                 # End of eval test.
 
-                summary_writer.add_scalar("Time/epoch (min)", (time.time()-epoch_time_start)/60, epoch)
-                summary_writer.flush()    
-                # End of epoch.
+            summary_writer.add_scalar("Time/epoch (min)", (time.time()-epoch_time_start)/60, epoch)
+            summary_writer.flush()    
+            # End of epoch.
     except KeyboardInterrupt as e:
         logging.error(f"Received {e}. Ending training.")
     
