@@ -20,10 +20,11 @@ def sample_value(values):
         sampled_value = random_between(*values)
     return sampled_value
 
-SEARCH_DIR = "/home/shared/deepsdf/searches/sirenVrelu_100_shapes"
+SEARCH_DIR = "/home/shared/deepsdfcomp/searches/ffe_500/ffe_500_shapes_encoding"
+# HPARAM_RANGES_FILE = "/home/shared/deepsdfcomp/searches/ffe_500_shapes/hparam_ranges_ref.json"
 HPARAM_RANGES_FILE = os.path.join(SEARCH_DIR, "hparam_ranges.json")
-# DEFAULT_SPECS_FILE = "/home/freissmuth/deepsdf/examples/planes/specs.json"
-DEFAULT_SPECS_FILE = "/home/shared/deepsdf/searches/default_specs.json"
+# DEFAULT_SPECS_FILE = "/home/freissmuth/deepsdf/examples/plane_dsdf/specs.json"
+DEFAULT_SPECS_FILE = "/home/shared/deepsdfcomp/searches/default_specs.json"
 NUM_EXPERIMENTS = 100
 
 import argparse

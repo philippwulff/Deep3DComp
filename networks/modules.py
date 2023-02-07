@@ -27,7 +27,7 @@ class Encoding3D(nn.Module):
         # Standard deviation.
         self.sigma = sigma
         # B ∈ Rm×d ~ N(0,σ2)
-        self.B = torch.normal(0, sigma**2, (self.encoding_features, 3), requires_grad=False)
+        self.B = nn.Parameter(torch.normal(0, sigma**2, (self.encoding_features, 3), requires_grad=False))
         # self.B *= self.sigma
     
     def forward(self, input):
