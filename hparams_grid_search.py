@@ -19,7 +19,7 @@ def flatten_dict(d: MutableMapping, parent_key: str = '', sep: str ='.') -> Muta
     return dict(items)
 
 SEARCH_DIR = "/home/shared/deepsdfcomp/searches/siren_500_gridsearch_quarter_params"
-DEFAULT_SPECS_FILE = "/home/shared/deepsdfcomp/searches/siren_500_latentsize_quarter_params/exp_0000_noBN_noDO_adjLR_xyzIA_noWN_CodeLength=211/specs.json"
+DEFAULT_SPECS_FILE = "/home/shared/deepsdfcomp/searches/siren_500_gridsearch_quarter_params/default_specs.json"
 
 import argparse
 
@@ -33,7 +33,7 @@ grid_axes = {"NetworkSpecs": {"norm_layers": [[],],
                               "dropout": [[],],
                               "dropout_prob" : [0,],
                               "latent_in" : [[], [4]],
-                              "xyz_in_all": [True, False], # maybe remove
+                              "xyz_in_all": [True], # maybe remove
                               "latent_dropout" : [True, False],},
              "LearningRateSchedule": {[
              ]},
