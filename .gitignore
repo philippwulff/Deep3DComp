@@ -10,6 +10,7 @@ data/*
 **/Reconstructions
 **/TensorBoard
 **/ReconstructionsTrain
+**/Evaluation
 Logs.pth
 
 

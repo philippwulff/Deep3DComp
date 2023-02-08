@@ -82,9 +82,10 @@ def evaluate(experiment_directory, checkpoint, data_dir, split_filename):
         ),
         "w",
     ) as f:
-        f.write("shape, chamfer_dist\n")
+        # semicolon-separated CSV file
+        f.write("shape;chamfer_dist;all_chamfer_dist\n")
         for result in chamfer_results:
-            f.write("{}, {}\n".format(result[0], result[1]))
+            f.write("{};{};{}\n".format(result[0], result[1][0], result[1][1]))
 
 
 if __name__ == "__main__":

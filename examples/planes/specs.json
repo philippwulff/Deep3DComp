@@ -1,7 +1,7 @@
 {
   "Description" : [ "This experiment learns a shape representation for planes ",
                     "using data from ShapeNet version 2." ],
-  "DataSource" : "data",
+  "DataSource" : "../../shared/deepsdfcomp/data",
   "TrainSplit" : "examples/splits/sv2_planes_train.json",
   "TestSplit" : "examples/splits/sv2_planes_test.json",
   "NetworkArch" : "deep_sdf_decoder",
@@ -39,6 +39,10 @@
   "ClampingDistance" : 0.1,
   "CodeRegularization" : true,
   "CodeRegularizationLambda" : 1e-4,
-  "CodeBound" : 1.0
+  "CodeBound" : 1.0,
+  "EvalTrainFrequency": 50,
+  "EvalTestFrequency": 100,
+  "EvalTrainSceneNumber": 10,
+  "EvalTestSceneNumber": 10
 }
 
