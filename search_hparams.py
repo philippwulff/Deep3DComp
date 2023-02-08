@@ -20,11 +20,11 @@ def sample_value(values):
         sampled_value = random_between(*values)
     return sampled_value
 
-SEARCH_DIR = "/home/shared/deepsdfcomp/searches/ffe_500/ffe_500_shapes_encoding"
+SEARCH_DIR = "/home/shared/deepsdfcomp/searches/siren_500_latentsize_quarter_params"
 # HPARAM_RANGES_FILE = "/home/shared/deepsdfcomp/searches/ffe_500_shapes/hparam_ranges_ref.json"
 HPARAM_RANGES_FILE = os.path.join(SEARCH_DIR, "hparam_ranges.json")
-# DEFAULT_SPECS_FILE = "/home/freissmuth/deepsdf/examples/plane_dsdf/specs.json"
-DEFAULT_SPECS_FILE = "/home/shared/deepsdfcomp/searches/default_specs.json"
+DEFAULT_SPECS_FILE = "/home/freissmuth/deepsdf/examples/plane_dsdf/specs.json"
+# DEFAULT_SPECS_FILE = "/home/shared/deepsdfcomp/searches/sirenVrelu_1_shape/exp_0075_WORKS!!!_CodeLength=9_nonlinearity=sine_LrInitial=0.00011_Factor=0.903/specs.json"
 NUM_EXPERIMENTS = 100
 
 import argparse
@@ -40,7 +40,8 @@ with open(HPARAM_RANGES_FILE) as f:
 with open(DEFAULT_SPECS_FILE) as f:
     default_specs = json.load(f)
 
-for i in range(NUM_EXPERIMENTS):
+codelengths = [4, 32, 128, 256]
+for iExp in range(NUM_EXPERIMENTS):
     searched_hparams = {}
     specs = {**default_specs}
     
@@ -55,7 +56,6 @@ for i in range(NUM_EXPERIMENTS):
 
     # sample architecture hparams
     for k, v in hparam_ranges["NetworkSpecs"].items():
-        sampled_v = sample_value(v)
         # handle build of dims array separateley
         if k in ("depth", "width"):
             if not "depth" in hparam_ranges["NetworkSpecs"] and "width" in hparam_ranges["NetworkSpecs"]:
@@ -68,6 +68,10 @@ for i in range(NUM_EXPERIMENTS):
                 searched_hparams["width"] = width
             specs["NetworkSpecs"]["dims"] = sampled_dims
             continue
+        if len(v) == 0:
+            specs["NetworkSpecs"][k] = []
+            continue
+        sampled_v = sample_value(v)
         specs["NetworkSpecs"][k] = sampled_v
         if len(v) > 1 and (v[0] != v[1]):
             searched_hparams[k] = sampled_v
@@ -100,7 +104,7 @@ for i in range(NUM_EXPERIMENTS):
         exp_nos = [int(name.split("_")[1]) for name in dir_names]
         if len(exp_nos)>0:
             exp_number = max(exp_nos) + 1
-    exp_name = f"exp_{exp_number:04}"
+    exp_name = f"exp_{exp_number:04}_noBN_noDO_xyzIA"
     
     # create exp directory and write specs.json
     if len(searched_hparams) > 0:
@@ -110,5 +114,5 @@ for i in range(NUM_EXPERIMENTS):
     with open(os.path.join(exp_dir, "specs.json"), "w+") as f:
         json.dump(specs, f, indent=4)
     
-    # start experimen
-    main_function(exp_dir, None, 1)
+    # start experiment
+    main_function(exp_dir, None, 3)
