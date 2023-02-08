@@ -33,7 +33,7 @@ grid_axes = {"NetworkSpecs": {"norm_layers": [[],],
                               "dropout": [[],],
                               "dropout_prob" : [0,],
                               "latent_in" : [[], [4]],
-                              "xyz_in_all": [True, False], # maybe remove
+                              "xyz_in_all": [True], # maybe remove
                               "latent_dropout" : [True, False],},
              "LearningRateSchedule": {[
              ]},
