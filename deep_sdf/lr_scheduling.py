@@ -37,9 +37,9 @@ class WarmupLearningRateSchedule(LearningRateSchedule):
 def get_learning_rate_schedules(specs):
 
     schedule_specs = specs["LearningRateSchedule"]
+    assert schedule_specs != [], "LearningRateSchedule NEEDS TO CONTAIN TWO DICTS BUT WAS EMPTY."
 
     schedules = []
-
     for schedule_specs in schedule_specs:
 
         if schedule_specs["Type"] == "Step":

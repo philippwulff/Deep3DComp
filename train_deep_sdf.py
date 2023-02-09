@@ -635,10 +635,16 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         logging.error(f"Received {e}. Ending training.")
     
     # Log hparams and graph to TensorBoard.
-    writer_hparams = {k: (str(v) if type(v) == list else v) for k, v in specs["NetworkSpecs"].items()}
-    train_results = {"BestTrainLoss" : min(loss_log),
-                    "BestTrainCD" : min(train_chamfer_dists_log) if len(train_chamfer_dists_log) else -1,
-                    "BestTestCD" : min(test_chamfer_dists_log) if len(test_chamfer_dists_log) else -1,}
+    writer_hparams = {
+        **{k: v if not isinstance(v, list) else str(v) for k, v in specs["NetworkSpecs"].items()},
+        **{f"net_lr_schedule.{k}": v for k, v in specs["LearningRateSchedule"][0]},
+        **{f"lat_lr_schedule.{k}": v for k, v in specs["LearningRateSchedule"][1]},
+    }
+    train_results = {
+        "best_train_loss" : min(loss_log),
+        "best_train_cd" : min(train_chamfer_dists_log) if len(train_chamfer_dists_log) else -1,
+        "best_test_cd" : min(test_chamfer_dists_log) if len(test_chamfer_dists_log) else -1,
+    }
     summary_writer.add_hparams(writer_hparams, train_results, run_name='.')
     summary_writer.add_graph(decoder, input)        
     summary_writer.flush()    

@@ -6,6 +6,7 @@ import torch
 import trimesh
 import numpy as np
 from typing import Union 
+import math
 
 
 def add_common_args(arg_parser):
@@ -92,3 +93,12 @@ def as_mesh(scene_or_mesh):
         assert(isinstance(scene_or_mesh, trimesh.Trimesh))
         mesh = scene_or_mesh
     return mesh
+
+
+def comp_fc_net_frac_params(num_params, codelength, div):
+    """Returns the width of an equal-width FC network with num_params/div parameters.
+    lz = 512
+    cl = 256
+    np = lz*(cl+3) + lz*lz*7 + lz
+    """
+    return - (codelength+4)/(7*2) + math.sqrt(((codelength+4)/(7*2))**2 + (num_params/(div*7)))
