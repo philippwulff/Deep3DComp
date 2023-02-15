@@ -488,10 +488,10 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             for _name, _param in decoder.named_parameters():
                 if _name.startswith("module.decoder."):
                     _name = _name[15:]
-                if ("weight" in _name or "bias" in _name): 
-                    summary_writer.add_scalar(f"WeightAbsSum/{_name}", _param.abs().sum(), global_step=epoch)
-                    if _param.grad is not None:
-                        summary_writer.add_scalar(f"GradAbsSum/{_name}.grad", _param.grad.abs().sum(), global_step=epoch)
+                summary_writer.add_scalar(f"WeightsNorm/{_name}", _param.norm(p=2).item(), global_step=epoch)
+                if hasattr(_param, "grad") and _param.grad is not None:
+                    summary_writer.add_scalar(f"GradsNorm/{_name}.grad", _param.grad.norm(p=2).item(), global_step=epoch)
+
             # Save checkpoint.
             if epoch in checkpoints:
                 save_checkpoints(epoch)
@@ -543,13 +543,14 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                     
                     del train_mesh, mesh_class_id, mesh_shape_id, save_name
 
-                logging.debug(f"Chamfer distance mean: {sum(chamfer_dists)/len(chamfer_dists)} from {chamfer_dists}.")            
-                summary_writer.add_scalar("Mean Chamfer Dist/train", sum(chamfer_dists)/len(chamfer_dists), epoch)
-                fig, percentiles = plotting.plot_dist_violin(np.concatenate(chamfer_dists_all, axis=0))
-                summary_writer.add_figure("CD Percentiles/train dists", fig, global_step=epoch)
-                for p in [75, 90, 99]:
-                    if p in percentiles:
-                        summary_writer.add_scalar(f"CD Percentiles/train {p}th", percentiles[p], global_step=epoch)
+                if chamfer_dists:
+                    logging.debug(f"Chamfer distance mean: {sum(chamfer_dists)/len(chamfer_dists)} from {chamfer_dists}.")            
+                    summary_writer.add_scalar("Mean Chamfer Dist/train", sum(chamfer_dists)/len(chamfer_dists), epoch)
+                    fig, percentiles = plotting.plot_dist_violin(np.concatenate(chamfer_dists_all, axis=0))
+                    summary_writer.add_figure("CD Percentiles/train dists", fig, global_step=epoch)
+                    for p in [75, 90, 99]:
+                        if p in percentiles:
+                            summary_writer.add_scalar(f"CD Percentiles/train {p}th", percentiles[p], global_step=epoch)
                 summary_writer.add_scalar("Time/train eval per shape (sec)", (time.time()-eval_train_time_start)/len(eval_test_filenames), epoch)
                 # End of eval train.
             
@@ -611,21 +612,21 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                         chamfer_dists.append(cd)
                         chamfer_dists_all.append(cd_all)
 
-                    del test_sdf_samples
-                    del test_mesh
+                    del test_sdf_samples, test_mesh
 
-                logging.debug(f"Test Chamfer distance mean: {sum(chamfer_dists)/len(chamfer_dists)} from {chamfer_dists}.")            
-                summary_writer.add_scalar("Mean Chamfer Dist/test", sum(chamfer_dists)/len(chamfer_dists), epoch)
-                summary_writer.add_scalar("Loss/test", test_err_sum/len(eval_test_filenames), epoch)
-                mlm = torch.mean(torch.norm(torch.cat(test_latents, dim=0), dim=1))
-                summary_writer.add_scalar("Mean Latent Magnitude/test", mlm, global_step=epoch)
-                fig = plotting.plot_train_stats(loss_hists=test_loss_hists, labels=mesh_label_names)
-                summary_writer.add_figure("Loss/test optimization curves", fig, epoch)
-                fig, percentiles = plotting.plot_dist_violin(np.concatenate(chamfer_dists_all, axis=0))
-                summary_writer.add_figure("CD Percentiles/test dists", fig, global_step=epoch)
-                for p in [75, 90, 99]:
-                    if p in percentiles:
-                        summary_writer.add_scalar(f"CD Percentiles/test {p}th", percentiles[p], global_step=epoch)
+                if chamfer_dists:
+                    logging.debug(f"Test Chamfer distance mean: {sum(chamfer_dists)/len(chamfer_dists)} from {chamfer_dists}.")            
+                    summary_writer.add_scalar("Mean Chamfer Dist/test", sum(chamfer_dists)/len(chamfer_dists), epoch)
+                    summary_writer.add_scalar("Loss/test", test_err_sum/len(eval_test_filenames), epoch)
+                    mlm = torch.mean(torch.norm(torch.cat(test_latents, dim=0), dim=1))
+                    summary_writer.add_scalar("Mean Latent Magnitude/test", mlm, global_step=epoch)
+                    fig = plotting.plot_train_stats(loss_hists=test_loss_hists, labels=mesh_label_names)
+                    summary_writer.add_figure("Loss/test optimization curves", fig, epoch)
+                    fig, percentiles = plotting.plot_dist_violin(np.concatenate(chamfer_dists_all, axis=0))
+                    summary_writer.add_figure("CD Percentiles/test dists", fig, global_step=epoch)
+                    for p in [75, 90, 99]:
+                        if p in percentiles:
+                            summary_writer.add_scalar(f"CD Percentiles/test {p}th", percentiles[p], global_step=epoch)
                 summary_writer.add_scalar("Time/test eval per shape (sec)", (time.time()-eval_test_time_start)/len(eval_test_filenames), epoch)
                 # End of eval test.
 
@@ -636,10 +637,23 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         logging.error(f"Received {e}. Ending training.")
     
     # Log hparams and graph to TensorBoard.
-    writer_hparams = {k: (str(v) if type(v) == list else v) for k, v in specs["NetworkSpecs"].items()}
-    train_results = {"BestTrainLoss" : min(loss_log),
-                    "BestTrainCD" : min(train_chamfer_dists_log) if len(train_chamfer_dists_log) else -1,
-                    "BestTestCD" : min(test_chamfer_dists_log) if len(test_chamfer_dists_log) else -1,}
+    writer_hparams = {
+        **{k: v if isinstance(v, (int, float, str, bool)) else str(v) for k, v in specs.items() if not isinstance(v, dict)},
+        # Add the NetworkSpecs dict.
+        **{k: v if not isinstance(v, list) else str(v) for k, v in specs["NetworkSpecs"].items()},
+        # Add the LR schedule dicts.                                                           
+        **{f"net_lr_schedule.{k}": v for k, v in specs["LearningRateSchedule"][0].items()},
+        **{f"lat_lr_schedule.{k}": v for k, v in specs["LearningRateSchedule"][1].items()},
+        # "NumEpochs": specs["NumEpochs"],
+        # "CodeLength": specs["CodeLength"],
+        # "CodeRegularization": str(do_code_regularization),
+        # "CodeRegularizationLambda": code_reg_lambda,
+    }
+    train_results = {
+        "best_train_loss" : min(loss_log),
+        "best_train_cd" : min(train_chamfer_dists_log) if len(train_chamfer_dists_log) else -1,
+        "best_test_cd" : min(test_chamfer_dists_log) if len(test_chamfer_dists_log) else -1,
+    }
     summary_writer.add_hparams(writer_hparams, train_results, run_name='.')
     summary_writer.add_graph(decoder, input)        
     summary_writer.flush()    

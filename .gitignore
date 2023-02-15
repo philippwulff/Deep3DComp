@@ -2,6 +2,9 @@ bin/*
 build/*
 data/*
 .vscode
+*.csv
+*.obj
+*.pyl
 
 # Log files, reconstructions
 **/LatentCodes
