@@ -58,7 +58,7 @@ def run_quadriflow_until_cd(quadriflow_exec_path: str, input_obj_path: str, outp
             
         # Decrease resolution is chamfer distance too low.
         # Increase resolution if chamfer distance too high.
-ja        resolution += resolution * (cd - target_chamfer_dist) * 10      # the last factor is just a weight
+        resolution += resolution * (cd - target_chamfer_dist) * 10      # the last factor is just a weight
         
     print("here")
     if not success:

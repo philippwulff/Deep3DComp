@@ -14,7 +14,10 @@ def compute_trimesh_chamfer(gt_points, gen_mesh, offset, scale, num_mesh_samples
     gen_mesh: trimesh.base.Trimesh of output mesh from whichever autoencoding reconstruction
               method (see compute_metrics.py for more)
     """
-    gen_points_sampled = trimesh.sample.sample_surface(gen_mesh, num_mesh_samples)[0]
+    try:
+        gen_points_sampled = trimesh.sample.sample_surface(gen_mesh, num_mesh_samples)[0]
+    except IndexError as e:
+        raise IndexError
 
     gen_points_sampled = gen_points_sampled / scale - offset
 
