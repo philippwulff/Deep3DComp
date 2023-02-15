@@ -99,7 +99,7 @@ if __name__ == "__main__":
     with open(DEFAULT_SPECS_FILE) as f:
         default_specs = json.load(f)
 
-    for exp in exps:
+    for exp in exps[16:]:
         # Produce specs for this experiment.
         specs = copy.deepcopy(default_specs)
         for k, v in exp.items():
@@ -119,6 +119,8 @@ if __name__ == "__main__":
         exp_name = f"exp_{exp_number:04}"
         
         searched_hparams = flatten_dict(exp)
+        searched_hparams["LearningRateSchedule"] = searched_hparams["LearningRateSchedule"][0]['Initial']
+        searched_hparams = {k.replace("NetworkSpecs.", ""):v for k, v in searched_hparams.items()}
         if len(searched_hparams) > 0:
             exp_name += "_" + "_".join(f"{k}={round(v, -int(log10(abs(v)))+3)}" if isinstance(v, float) else f"{k}={v}" for k, v in searched_hparams.items() if v)
         # Create exp directory and write specs.json
