@@ -23,9 +23,9 @@ def sample_value(values):
 SEARCH_DIR = "/home/shared/deepsdfcomp/searches/siren_500_latentsize_quarter_params"
 # HPARAM_RANGES_FILE = "/home/shared/deepsdfcomp/searches/ffe_500_shapes/hparam_ranges_ref.json"
 HPARAM_RANGES_FILE = os.path.join(SEARCH_DIR, "hparam_ranges.json")
-DEFAULT_SPECS_FILE = "/home/freissmuth/deepsdf/examples/plane_dsdf/specs.json"
-# DEFAULT_SPECS_FILE = "/home/shared/deepsdfcomp/searches/sirenVrelu_1_shape/exp_0075_WORKS!!!_CodeLength=9_nonlinearity=sine_LrInitial=0.00011_Factor=0.903/specs.json"
-NUM_EXPERIMENTS = 100
+# DEFAULT_SPECS_FILE = "/home/freissmuth/deepsdf/examples/plane_dsdf/specs.json"
+DEFAULT_SPECS_FILE = "/home/shared/deepsdfcomp/searches/siren_500_gridsearch_quarter_params/exp_0019_latent_in=[4]_latent_dropout=True_LearningRateSchedule=0.0005_CodeLength=200/specs.json"
+NUM_EXPERIMENTS = 5
 
 import argparse
 
@@ -40,7 +40,7 @@ with open(HPARAM_RANGES_FILE) as f:
 with open(DEFAULT_SPECS_FILE) as f:
     default_specs = json.load(f)
 
-codelengths = [4, 32, 128, 256]
+codelengths = [16, 32, 64, 127, 200]
 for iExp in range(NUM_EXPERIMENTS):
     searched_hparams = {}
     specs = {**default_specs}
@@ -96,6 +96,10 @@ for iExp in range(NUM_EXPERIMENTS):
     # # TODO remove
     # if specs["NetworkSpecs"]["nonlinearity"] == "relu":
     #     continue
+    specs["CodeLength"] = codelengths[iExp]
+    searched_hparams["CodeLength"] = codelengths[iExp]
+
+    
 
     # find exp name (continuous counter and searched hparams)
     exp_number = 0
@@ -104,7 +108,7 @@ for iExp in range(NUM_EXPERIMENTS):
         exp_nos = [int(name.split("_")[1]) for name in dir_names]
         if len(exp_nos)>0:
             exp_number = max(exp_nos) + 1
-    exp_name = f"exp_{exp_number:04}_noBN_noDO_xyzIA"
+    exp_name = f"exp_{exp_number:04}"
     
     # create exp directory and write specs.json
     if len(searched_hparams) > 0:

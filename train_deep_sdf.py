@@ -488,9 +488,10 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             for _name, _param in decoder.named_parameters():
                 if _name.startswith("module.decoder."):
                     _name = _name[15:]
-                if "weight" in _name or "bias" in _name: 
+                if ("weight" in _name or "bias" in _name): 
                     summary_writer.add_scalar(f"WeightAbsSum/{_name}", _param.abs().sum(), global_step=epoch)
-                    summary_writer.add_scalar(f"GradAbsSum/{_name}.grad", _param.grad.abs().sum(), global_step=epoch)
+                    if _param.grad is not None:
+                        summary_writer.add_scalar(f"GradAbsSum/{_name}.grad", _param.grad.abs().sum(), global_step=epoch)
             # Save checkpoint.
             if epoch in checkpoints:
                 save_checkpoints(epoch)
@@ -540,7 +541,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                         chamfer_dists.append(cd)
                         chamfer_dists_all.append(cd_all)
                     
-                    del train_mesh, mesh_class_id, mesh_shape_id, save_name, gt_mesh_path
+                    del train_mesh, mesh_class_id, mesh_shape_id, save_name
 
                 logging.debug(f"Chamfer distance mean: {sum(chamfer_dists)/len(chamfer_dists)} from {chamfer_dists}.")            
                 summary_writer.add_scalar("Mean Chamfer Dist/train", sum(chamfer_dists)/len(chamfer_dists), epoch)
