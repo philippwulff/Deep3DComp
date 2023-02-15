@@ -93,7 +93,6 @@ if __name__ == "__main__":
 
     output_dir = "data/quadriflow_until_cd_meshes"      # This needs to be changed to where you want your data to be extracted to!
     input_dir = "/mnt/hdd/ShapeNetCore.v2"
-    # input_dir = "data/manifold_meshes"
     split_path = "examples/splits/sv2_planes_test.json"
     quadriflow_executable = "../QuadriFlow/build/quadriflow"
 
