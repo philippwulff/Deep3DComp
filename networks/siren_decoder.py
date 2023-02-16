@@ -142,8 +142,8 @@ class SirenDecoder(nn.Module):
         NLS_AND_INITS = {
             "sine": (Sine(), sine_init, first_layer_sine_init),
             "relu": (nn.ReLU(), init_weights_normal, None),
-            "both_interpolate": ((Sine(), nn.ReLU()), sine_init, first_layer_sine_init),
-            "both_combine": ((nn.ReLU(), Sine()), sine_init, first_layer_sine_init)
+            "sine_relu_line": ((Sine(), nn.ReLU()), sine_init, first_layer_sine_init),
+            "sine_relu_plane": ((nn.ReLU(), Sine()), sine_init, first_layer_sine_init)
         }
         self.nonlinearity = nonlinearity
         try:
@@ -161,11 +161,11 @@ class SirenDecoder(nn.Module):
             else:
                 setattr(self, "lin" + str(i), nn.Linear(in_dim, out_dim))
 
-            # if necessary add linear combination layer for activations
-            if self.nonlinearity == "both_interpolate":
-                setattr(self, "nl_int" + str(i), nn.Parameter(torch.ones((out_dim,))))
-            elif self.nonlinearity == "both_combine":
-                setattr(self, "nl_comb" + str(i), nn.Parameter(torch.stack((torch.zeros((out_dim,)), torch.ones((out_dim,))), dim=1)))
+            # if necessary add linear plane layer for activations
+            if self.nonlinearity == "sine_relu_line":
+                setattr(self, "nl_line" + str(i), nn.Parameter(torch.ones((out_dim,))))
+            elif self.nonlinearity == "sine_relu_plane":
+                setattr(self, "nl_plane" + str(i), nn.Parameter(torch.stack((torch.zeros((out_dim,)), torch.ones((out_dim,))), dim=1)))
 
             # Add a batch norm i if no weight norm is wanted.
             if not weight_norm and self.norm_layers and i in self.norm_layers:
@@ -214,16 +214,16 @@ class SirenDecoder(nn.Module):
                 if i in self.norm_layers and not self.weight_norm:
                     bn = getattr(self, f"bn{i}")
                     x = bn(x)
-                if self.nonlinearity == "both_interpolate":
+                if self.nonlinearity == "sine_relu_line":
                     x_relu = self.nl[0](x)
                     x_sine = self.nl[1](x)
-                    nl_int = getattr(self, "nl_int" + str(i))
-                    x = nl_int * x_sine + (1 - nl_int) * x_relu
-                elif self.nonlinearity == "both_combine":
+                    nl_line = getattr(self, "nl_line" + str(i))
+                    x = nl_line * x_sine + (1 - nl_line) * x_relu
+                elif self.nonlinearity == "sine_relu_plane":
                     x_relu = self.nl[0](x)
                     x_sine = self.nl[1](x)
-                    nl_comb = getattr(self, "nl_comb" + str(i))
-                    x = nl_comb[:, 0] * x_relu + nl_comb[:, 1] * x_sine
+                    nl_plane = getattr(self, "nl_plane" + str(i))
+                    x = nl_plane[:, 0] * x_relu + nl_plane[:, 1] * x_sine
                 else:
                     x = self.nl(x)
                 if self.dropout and i in self.dropout:
