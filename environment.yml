@@ -1,0 +1,27 @@
+# run: conda env create --file environment.yml
+name: deep3dcomp
+channels: 
+  - pytorch
+  - nvidia
+  - pytorch3d
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pytorch 
+  - torchvision 
+  - torchaudio 
+  - pytorch-cuda=11.7   # NOTE: The version may differ on your system!
+  - pytorch3d
+  - ipython
+  - pip
+  - pyvista
+  - psutil
+  - pandas
+  - scipy
+  - matplotlib
+  - trimesh
+  - pyrender
+  - plyfile
+  - scikit-image=0.19.3
+  - pip:
+    - bpy
