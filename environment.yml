@@ -14,14 +14,16 @@ dependencies:
   - pytorch3d
   - ipython
   - pip
-  - pyvista
-  - psutil
   - pandas
   - scipy
   - matplotlib
+  - scikit-image>=0.19.3
+  - psutil
   - trimesh
   - pyrender
   - plyfile
-  - scikit-image=0.19.3
+  - scikit-learn
+  - pyvista
   - pip:
     - bpy
+    - mesh_to_sdf
