@@ -23,7 +23,7 @@ dependencies:
   - pyrender
   - plyfile
   - scikit-learn
-  - pyvista
   - pip:
     - bpy
     - mesh_to_sdf
+    - pyvista
