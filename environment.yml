@@ -1,8 +1,8 @@
 # run: conda env create --file environment.yml
 name: deep3dcomp
 channels: 
-  - pytorch
-  - nvidia
+  - pytorch         # Channel ordering is important!
+  - nvidia          
   - pytorch3d
   - conda-forge
 dependencies:
@@ -27,3 +27,4 @@ dependencies:
     - bpy
     - mesh_to_sdf
     - pyvista
+    # - ipykernel   # Might be needed if you run Jupyter Notebooks in VS Code
