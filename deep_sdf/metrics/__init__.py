@@ -9,6 +9,7 @@ def compute_metric(gt_mesh=None, gen_mesh=None, num_mesh_samples=30000, metric="
         gt_mesh = as_mesh(trimesh.load_mesh(gt_mesh))
     if gen_mesh is not None and isinstance(gen_mesh, str):
         gen_mesh = as_mesh(trimesh.load_mesh(gen_mesh))
+        
     if metric == "chamfer" and gt_mesh is not None and gen_mesh is not None:
         gen_points_sampled = trimesh.sample.sample_surface(gen_mesh, num_mesh_samples)[0]
         gt_points_sampled = trimesh.sample.sample_surface(gt_mesh, num_mesh_samples)[0]
