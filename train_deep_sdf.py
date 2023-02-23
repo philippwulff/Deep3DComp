@@ -590,7 +590,8 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                         return_loss_hist=True
                     )
                     logging.debug("[Test eval] Total reconstruction time: {}".format(time.time() - start))
-                    test_err_sum += test_loss_hist[-1]
+                    if not np.isnan(test_loss_hist[-1]):
+                        test_err_sum += test_loss_hist[-1]
                     test_loss_hists.append(test_loss_hist)
                     test_latents.append(test_latent)
 

@@ -7,7 +7,7 @@ import trimesh
 import numpy as np
 from typing import Union, List
 import math
-from pytorch3d.structures import Meshes
+# from pytorch3d.structures import Meshes
 
 
 R_x = lambda rad: np.array([[1, 0,           0,            0],
@@ -145,8 +145,8 @@ def scale_to_unit_sphere(mesh):
     return trimesh.Trimesh(vertices=vertices, faces=mesh.faces)
 
 
-def trimesh_to_pytorch3d_meshes(meshes: List[trimesh.Trimesh]) -> Meshes:
-    """Converts a Trimesh into a Meshes object."""
-    verts = [torch.Tensor(_.vertices) for _ in meshes]
-    faces = [torch.Tensor(_.faces) for _ in meshes]
-    return Meshes(verts, faces)
+# def trimesh_to_pytorch3d_meshes(meshes: List[trimesh.Trimesh]) -> Meshes:
+#     """Converts a Trimesh into a Meshes object."""
+#     verts = [torch.Tensor(_.vertices) for _ in meshes]
+#     faces = [torch.Tensor(_.faces) for _ in meshes]
+#     return Meshes(verts, faces)
