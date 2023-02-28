@@ -10,6 +10,8 @@ import trimesh
 import pyrender
 import math
 import pandas as pd
+import matplotlib.animation as animation
+from matplotlib.lines import Line2D
 
 
 os.environ['PYOPENGL_PLATFORM'] = 'egl'
@@ -179,3 +181,111 @@ def plot_binary_vs_continuous(df: pd.DataFrame, binary: str, continuous: str):
     fig, ax = plt.subplots(1, 2, figsize=(12, 4))
     df.plot(x=binary, y=continuous, kind="bar", ax=ax[0])
     df.groupby(binary).apply(lambda g: g.mean()).plot(y=continuous, kind="bar", ax=ax[1])
+
+
+def render_sdf(points: np.array, sdf: np.array, cam_angles=(-np.pi/7, np.pi/4, 0)):
+    """
+    Default angles are from top-right.
+    Example use:
+        c, d = render_sdf(points, sdf)
+        plt.imshow(c)
+    """
+    colors = np.zeros(points.shape)
+    colors[sdf < 0, 2] = 1      # inside -> Blue
+    colors[sdf > 0, 0] = 1      # outside -> Red
+    cloud = pyrender.Mesh.from_points(points, colors=colors)
+    scene = pyrender.Scene()
+    # cam = pyrender.PerspectiveCamera(yfov=np.pi / 3.0, aspectRatio=1.414)
+
+    scene.add(cloud)
+    # cam looks in neg z dir: https://pyrender.readthedocs.io/en/latest/examples/cameras.html
+    camera = pyrender.PerspectiveCamera(yfov=np.pi / 3.0)
+    camera_pose = np.eye(4)
+    camera_pose[2,3] = 2.0      # in z dir
+    camera_pose = utils.rotate(camera_pose, *cam_angles)
+    scene.add(camera, pose=camera_pose)
+
+    light = pyrender.SpotLight(color=np.ones(3), intensity=10.0, innerConeAngle=np.pi/4.0)
+    scene.add(light, pose=camera_pose)
+
+    # viewer = pyrender.Viewer(scene, use_raymond_lighting=True, point_size=2)
+    r = pyrender.OffscreenRenderer(viewport_width=480, viewport_height=480, point_size=1.0)
+    color, depth = r.render(scene)
+    r.delete()
+
+    return color, depth
+
+
+def render_mesh(mesh: trimesh.Trimesh, cam_angles=(-np.pi/7, np.pi/4, 0)):
+    mesh = pyrender.Mesh.from_trimesh(mesh)
+    scene = pyrender.Scene()
+    scene.add(mesh)
+    # cam looks in neg z dir: https://pyrender.readthedocs.io/en/latest/examples/cameras.html
+    camera = pyrender.PerspectiveCamera(yfov=np.pi / 3.0)
+    camera_pose = np.eye(4)
+    camera_pose[2,3] = 2      # in z dir
+    camera_pose = utils.rotate(camera_pose, *cam_angles)
+    scene.add(camera, pose=camera_pose)
+    light = pyrender.SpotLight(color=np.ones(3), intensity=10.0, innerConeAngle=np.pi/4.0)
+    scene.add(light, pose=camera_pose)
+
+    r = pyrender.OffscreenRenderer(viewport_width=480, viewport_height=480, point_size=1.0)
+    color, depth = r.render(scene)
+    r.delete()
+    return color, depth
+
+
+def render_sdf_vid(points: np.array, sdf: np.array, fps=2, n_seconds=5, save_filepath=""):
+    """Renders a SDF from different angles and makes a video."""
+    fig = plt.figure( figsize=(8,8) )
+    color, depth = render_sdf(points, sdf)
+    im = plt.imshow(color, interpolation='none', aspect='auto', vmin=0, vmax=1)
+
+    def animate_func(i):
+        if i % fps == 0:
+            print( '.', end ='' )
+        # quarter of a full rotation
+        rot = (np.pi/2 * i)/(fps * n_seconds)
+        color, depth = render_sdf(points, sdf, cam_angles=(-np.pi/7, np.pi/4+rot, 0))
+        im.set_array(color)
+        return [im]
+
+    # interval in ms
+    anim = animation.FuncAnimation(fig, animate_func, frames=n_seconds * fps, interval=1000/fps,)
+    if save_filepath:
+        anim.save(save_filepath + ".mp4", fps=fps, extra_args=['-vcodec', 'libx264'])
+    return anim
+
+
+def plot_sdf_cross_section(points: np.array, sdf: np.array, margin=0.05, plane_orig=np.array([0,0,0]), plane_normal=np.array([1,0,0]), save_filepath="", ax=None):
+    """
+    Projecting a point onto a plane: 
+    https://stackoverflow.com/questions/9605556/how-to-project-a-point-onto-a-plane-in-3d
+    """
+    plane_normal = plane_normal / np.linalg.norm(plane_normal)
+
+    dists_from_plane = (points - plane_orig).dot(plane_normal)
+    in_margin = np.abs(dists_from_plane) < margin
+
+    proj_points_in_margin = points[in_margin] - dists_from_plane[in_margin][:,None] * plane_normal
+
+    # Y-axis chosen to always point up
+    y_axis = np.array([0,0,1]) - np.array([0,0,1]).dot(plane_normal) * plane_normal
+    y_axis = y_axis / np.linalg.norm(y_axis)
+    x_axis = np.cross(plane_normal, y_axis)
+    x_axis = x_axis / np.linalg.norm(x_axis)
+
+    p_x = proj_points_in_margin.dot(x_axis)
+    p_y = proj_points_in_margin.dot(y_axis)
+
+    colors = ["blue" if _ < 0. else "red" for _ in sdf[in_margin]]
+
+    legend_elements = [
+        Line2D([0], [0], marker='o', color='w', label='SDF > 0', markerfacecolor='red', markersize=5),
+        Line2D([0], [0], marker='o', color='w', label='SDF < 0', markerfacecolor='blue', markersize=5),
+    ]
+    if not ax:
+        fig, ax = plt.subplots()
+    ax.scatter(p_x, p_y, c=colors, s=0.5)
+    ax.legend(handles=legend_elements)
+    return ax

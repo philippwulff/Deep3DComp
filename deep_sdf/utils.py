@@ -62,6 +62,7 @@ def add_common_args(arg_parser):
 
 def configure_logging(args):
     logger = logging.getLogger()
+    logger.handlers.clear()     # Remove existing default handlers.
     if args.debug:
         logger.setLevel(logging.DEBUG)
     elif args.quiet:

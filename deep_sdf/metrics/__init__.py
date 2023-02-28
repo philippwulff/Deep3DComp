@@ -1,7 +1,8 @@
+import os
 import trimesh
 from deep_sdf.metrics.chamfer import compute_chamfer
-from deep_sdf.utils import as_mesh, trimesh_to_pytorch3d_meshes
-from pytorch3d.loss import mesh_normal_consistency
+from deep_sdf.metrics.mesh_normal_consistency import compute_mesh_normal_consistency
+from deep_sdf.utils import as_mesh
 
 
 def compute_metric(gt_mesh=None, gen_mesh=None, num_mesh_samples=30000, metric="chamfer"):
@@ -15,7 +16,6 @@ def compute_metric(gt_mesh=None, gen_mesh=None, num_mesh_samples=30000, metric="
         gt_points_sampled = trimesh.sample.sample_surface(gt_mesh, num_mesh_samples)[0]
         return compute_chamfer(gen_points_sampled, gt_points_sampled)
     elif metric == "normal_consistency":
-        meshes = trimesh_to_pytorch3d_meshes([gen_mesh])
-        return mesh_normal_consistency(meshes)
+        return compute_mesh_normal_consistency(gen_mesh)
     else:
         return NotImplementedError(f"Chosen metric '{metric}' does not exist.")
