@@ -101,9 +101,10 @@ if __name__ == "__main__":
     # Setup args and logging.
     arg_parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
     arg_parser.add_argument(
-        "--target_chamfer_dist", "-cd",
+        "--target_chamfer_dist", "-c",
         dest="target_chamfer_dist",
         default=0.001,
+        type=float,
         help="The mean reconstruction chamfer distance to compress to.",
     )
     arg_parser.add_argument(
@@ -178,4 +179,4 @@ if __name__ == "__main__":
             logs_df_all = pd.concat([logs_df_old, logs_df], ignore_index=True, axis=0)
             logs_df_all.to_csv(df_output_path)
         else:
-            logs_df.to_csv(df_output_path)
+            logs_df.to_csv(df_output_path, index=False)

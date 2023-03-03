@@ -28,4 +28,5 @@ dependencies:
     - pyrender
     - pyvista
     - tensorboard
+    - point-cloud-utils
     # - ipykernel   # Might be needed if you run Jupyter Notebooks in VS Code
