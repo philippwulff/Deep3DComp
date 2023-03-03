@@ -7,14 +7,14 @@ import os
 import deep_sdf.workspace as ws
 from deep_sdf import utils, metrics
 import trimesh
-import pyrender
 import math
 import pandas as pd
 import matplotlib.animation as animation
 from matplotlib.lines import Line2D
-
-
-# os.environ['PYOPENGL_PLATFORM'] = 'egl'
+if not os.name == "nt":
+    # We do not import this on Windows.
+    import pyrender
+    os.environ['PYOPENGL_PLATFORM'] = 'egl'
 
 
 def plot_train_stats(loss_hists: list, psnr_hist=None, step_hist=None, labels=None, save_path="") -> plt.figure:
