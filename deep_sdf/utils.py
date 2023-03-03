@@ -149,7 +149,7 @@ def scale_to_unit_sphere(mesh):
     return trimesh.Trimesh(vertices=vertices, faces=mesh.faces)
 
 
-def trimesh_to_pytorch3d_meshes(meshes: List[trimesh.Trimesh]) -> Meshes:
+def trimesh_to_pytorch3d_meshes(meshes: List[trimesh.Trimesh]):
     """Converts a Trimesh into a Meshes object."""
     verts = [torch.Tensor(_.vertices) for _ in meshes]
     faces = [torch.Tensor(_.faces) for _ in meshes]
