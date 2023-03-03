@@ -233,9 +233,9 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         logging.info("Stopping early...")
         sys.exit(0)
 
-    def adjust_learning_rate(lr_schedules, optimizer, epoch):
+    def adjust_learning_rate(lr_schedules, optimizer, epoch, loss_log):
         for i, param_group in enumerate(optimizer.param_groups):
-            param_group["lr"] = lr_schedules[i].get_learning_rate(epoch)
+            param_group["lr"] = lr_schedules[i].get_learning_rate(epoch, loss_log)
 
     def empirical_stat(latent_vecs, indices):
         lat_mat = torch.zeros(0).cuda()
@@ -339,7 +339,8 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
     summary_writer = SummaryWriter(log_dir=os.path.join(experiment_directory, ws.tb_logs_dir))
 
-    loss_log = []
+    loss_log = []               # per-batch
+    loss_log_epoch = []         # per-epoch
     lr_log = []
     lat_mag_log = []
     timing_log = []
@@ -362,6 +363,10 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         optimizer_epoch = load_optimizer(
             experiment_directory, continue_from + ".pth", optimizer_all
         )
+        # TODO test this
+        for i, lrs in enumerate(lr_schedules):
+            if isinstance(lrs, lr_scheduling.StepLearningRateOnPlateauSchedule):
+                lrs.last_lr = optimizer_all.param_groups[i]["lr"]
 
         loss_log, lr_log, timing_log, lat_mag_log, param_mag_log, log_epoch = load_logs(
             experiment_directory
@@ -404,13 +409,14 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         for epoch in range(start_epoch, num_epochs + 1):
 
             epoch_time_start = time.time()
+            epoch_losses = []
 
             logging.info("epoch {}...".format(epoch))
 
             # Required because evaluation puts the decoder into 'eval' mode.
             decoder.train()
 
-            adjust_learning_rate(lr_schedules, optimizer_all, epoch)
+            adjust_learning_rate(lr_schedules, optimizer_all, epoch, loss_log_epoch)
             for sdf_data, indices in sdf_loader:
                 # Process the input data
                 sdf_data = sdf_data.reshape(-1, 4)
@@ -463,8 +469,8 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                 
                     
                 logging.debug("loss = {}".format(batch_loss))
-                summary_writer.add_scalar("Loss/train", batch_loss, global_step=epoch)
                 loss_log.append(batch_loss)
+                epoch_losses.append(batch_loss)
 
                 if grad_clip is not None:
 
@@ -475,10 +481,14 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             # LOG EPOCH
             seconds_elapsed = time.time() - epoch_time_start
             timing_log.append(seconds_elapsed)
+            # Log epoch loss.
+            epoch_loss = sum(epoch_losses)/len(epoch_losses)
+            loss_log_epoch.append(epoch_loss)
+            summary_writer.add_scalar("Loss/train", epoch_loss, global_step=epoch)
             # Log learning rate.
             lr_log.append([schedule.get_learning_rate(epoch) for schedule in lr_schedules])
-            summary_writer.add_scalar("Learning Rate/Params", lr_schedules[0].get_learning_rate(epoch), global_step=epoch)
-            summary_writer.add_scalar("Learning Rate/Latent", lr_schedules[1].get_learning_rate(epoch), global_step=epoch)
+            summary_writer.add_scalar("Learning Rate/Params", lr_log[-1][0], global_step=epoch)
+            summary_writer.add_scalar("Learning Rate/Latent", lr_log[-1][1], global_step=epoch)
             # Log latent vector length.
             mlm = get_mean_latent_vector_magnitude(lat_vecs)
             lat_mag_log.append(mlm)
@@ -590,7 +600,8 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                         return_loss_hist=True
                     )
                     logging.debug("[Test eval] Total reconstruction time: {}".format(time.time() - start))
-                    test_err_sum += test_loss_hist[-1]
+                    if not np.isnan(test_loss_hist[-1]):
+                        test_err_sum += test_loss_hist[-1]
                     test_loss_hists.append(test_loss_hist)
                     test_latents.append(test_latent)
 
@@ -634,31 +645,49 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             summary_writer.flush()    
             # End of epoch.
     except KeyboardInterrupt as e:
-        logging.error(f"Received {e}. Ending training.")
-    
-    # Log hparams and graph to TensorBoard.
-    writer_hparams = {
-        **{k: v if isinstance(v, (int, float, str, bool)) else str(v) for k, v in specs.items() if not isinstance(v, dict)},
-        # Add the NetworkSpecs dict.
-        **{k: v if not isinstance(v, list) else str(v) for k, v in specs["NetworkSpecs"].items()},
-        # Add the LR schedule dicts.                                                           
-        **{f"net_lr_schedule.{k}": v for k, v in specs["LearningRateSchedule"][0].items()},
-        **{f"lat_lr_schedule.{k}": v for k, v in specs["LearningRateSchedule"][1].items()},
-        # "NumEpochs": specs["NumEpochs"],
-        # "CodeLength": specs["CodeLength"],
-        # "CodeRegularization": str(do_code_regularization),
-        # "CodeRegularizationLambda": code_reg_lambda,
-    }
-    train_results = {
-        "best_train_loss" : min(loss_log),
-        "best_train_cd" : min(train_chamfer_dists_log) if len(train_chamfer_dists_log) else -1,
-        "best_test_cd" : min(test_chamfer_dists_log) if len(test_chamfer_dists_log) else -1,
-    }
-    summary_writer.add_hparams(writer_hparams, train_results, run_name='.')
-    summary_writer.add_graph(decoder, input)        
-    summary_writer.flush()    
-    summary_writer.close()
-    # End of training.
+        logging.error(f"Received {e}. Cleaninh up and e  nding training.")
+    finally:
+        # Calculate model size.
+        param_size = 0
+        param_cnt = 0
+        for param in decoder.parameters():
+            param_size += param.nelement() * param.element_size()
+            param_cnt += param.nelement()
+        buffer_size = 0
+        for buffer in decoder.buffers():
+            buffer_size += buffer.nelement() * buffer.element_size()
+        model_size_mb = (param_size + buffer_size) / 1024**2
+        
+        # Log hparams and graph to TensorBoard.
+        writer_hparams = {
+            **{k: v if isinstance(v, (int, float, str, bool)) else str(v) for k, v in specs.items() if not isinstance(v, dict)},
+            # Add the NetworkSpecs dict.
+            **{k: v if not isinstance(v, list) else str(v) for k, v in specs["NetworkSpecs"].items()},
+            # Add the LR schedule dicts.                                                           
+            **{f"net_lr_schedule.{k}": v for k, v in specs["LearningRateSchedule"][0].items()},
+            **{f"lat_lr_schedule.{k}": v for k, v in specs["LearningRateSchedule"][1].items()},
+            # Final LR values.
+            "last_net_lr": optimizer_all.param_groups[0]["lr"],
+            "last_lat_lr": optimizer_all.param_groups[1]["lr"],
+            # Storage values in MB.
+            "model_size_mb": model_size_mb,
+            "model_param_cnt": param_cnt,
+            "single_latent_size_mb": sum(p.nelement()*p.element_size() for p in lat_vecs.parameters()),
+            # "NumEpochs": specs["NumEpochs"],
+            # "CodeLength": specs["CodeLength"],
+            # "CodeRegularization": str(do_code_regularization),
+            # "CodeRegularizationLambda": code_reg_lambda,
+        }
+        train_results = {
+            "best_train_loss" : min(loss_log),
+            "best_train_cd" : min(train_chamfer_dists_log) if len(train_chamfer_dists_log) else -1,
+            "best_test_cd" : min(test_chamfer_dists_log) if len(test_chamfer_dists_log) else -1,
+        }
+        summary_writer.add_hparams(writer_hparams, train_results, run_name='.')
+        summary_writer.add_graph(decoder, input)        
+        summary_writer.flush()    
+        summary_writer.close()
+        # End of training.
 
 if __name__ == "__main__":
 

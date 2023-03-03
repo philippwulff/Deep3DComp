@@ -7,11 +7,11 @@ channels:
   - conda-forge
 dependencies:
   - python=3.10
-  - pytorch 
+  - pytorch=1.13.0      # Later versions do not work with PyTorch3d.
   - torchvision 
   - torchaudio 
   - pytorch-cuda=11.7   # NOTE: The version may differ on your system!
-  - pytorch3d
+  - pytorch3d           # Linux-only! Maybe comment this out on Windows.
   - ipython
   - pip
   - pandas
@@ -20,11 +20,12 @@ dependencies:
   - scikit-image>=0.19.3
   - psutil
   - trimesh
-  - pyrender
   - plyfile
   - scikit-learn
   - pip:
     - bpy
     - mesh_to_sdf
+    - pyrender
     - pyvista
+    - tensorboard
     # - ipykernel   # Might be needed if you run Jupyter Notebooks in VS Code
