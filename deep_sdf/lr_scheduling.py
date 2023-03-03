@@ -1,5 +1,5 @@
 class LearningRateSchedule:
-    def get_learning_rate(self, epoch, **kwargs):
+    def get_learning_rate(self, epoch, *args, **kwargs):
         pass
 
 
@@ -7,7 +7,7 @@ class ConstantLearningRateSchedule(LearningRateSchedule):
     def __init__(self, value):
         self.value = value
 
-    def get_learning_rate(self, epoch, **kwargs):
+    def get_learning_rate(self, epoch, *args, **kwargs):
         return self.value
 
 
@@ -18,7 +18,7 @@ class StepLearningRateSchedule(LearningRateSchedule):
         self.factor = factor
         self.last_lr = initial
 
-    def get_learning_rate(self, epoch, **kwargs):
+    def get_learning_rate(self, epoch, *args, **kwargs):
 
         return self.initial * (self.factor ** (epoch // self.interval))
 
@@ -46,7 +46,7 @@ class StepLearningRateOnPlateauSchedule(LearningRateSchedule):
         self.last_step_epoch = 0
         self.cooldown = cooldown
 
-    def get_learning_rate(self, epoch, loss_log=[], **kwargs):
+    def get_learning_rate(self, epoch, loss_log=[], *args, **kwargs):
         if len(loss_log) > self.patience and epoch - self.last_step_epoch > self.cooldown:
             before_patience_min = min(loss_log[:-self.patience])
             in_patience_min = min(loss_log[-self.patience:])
@@ -62,7 +62,7 @@ class WarmupLearningRateSchedule(LearningRateSchedule):
         self.warmed_up = warmed_up
         self.length = length
 
-    def get_learning_rate(self, epoch, **kwargs):
+    def get_learning_rate(self, epoch, *args, **kwargs):
         if epoch > self.length:
             return self.warmed_up
         return self.initial + (self.warmed_up - self.initial) * epoch / self.length
