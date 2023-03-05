@@ -229,9 +229,9 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         save_optimizer(experiment_directory, str(epoch) + ".pth", optimizer_all, epoch)
         save_latent_vectors(experiment_directory, str(epoch) + ".pth", lat_vecs, epoch)
 
-    def signal_handler(sig, frame):
-        logging.info("Stopping early...")
-        sys.exit(0)
+    # def signal_handler(sig, frame):
+    #     logging.info("Stopping early...")
+    #     sys.exit(0)
 
     def adjust_learning_rate(lr_schedules, optimizer, epoch, loss_log):
         for i, param_group in enumerate(optimizer.param_groups):
@@ -245,7 +245,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         var = torch.var(lat_mat, 0)
         return mean, var
 
-    signal.signal(signal.SIGINT, signal_handler)
+    # signal.signal(signal.SIGINT, signal_handler)
 
     num_samp_per_scene = specs["SamplesPerScene"]
     scene_per_batch = specs["ScenesPerBatch"]

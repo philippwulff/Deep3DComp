@@ -169,7 +169,8 @@ class SirenDecoder(nn.Module):
 
             # Add a batch norm i if no weight norm is wanted.
             if not weight_norm and self.norm_layers and i in self.norm_layers:
-                setattr(self, "bn" + str(i), nn.LayerNorm(out_dim))
+                # setattr(self, "bn" + str(i), nn.LayerNorm(out_dim))
+                setattr(self, "bn" + str(i), nn.BatchNorm1d(out_dim))
 
             # Initialize weights.
             if weight_init is not None:

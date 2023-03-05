@@ -29,4 +29,5 @@ dependencies:
     - pyvista
     - tensorboard
     - point-cloud-utils
+    - rtree
     # - ipykernel   # Might be needed if you run Jupyter Notebooks in VS Code

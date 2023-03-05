@@ -293,7 +293,7 @@ def plot_sdf_cross_section(points: np.array, sdf: np.array, margin=0.05, plane_o
 
 def plot_capacity_vs_chamfer_dist(
         exp_dirs: List, checkpoint: int = 2000, 
-        type: List = ["network"], 
+        type: str = "network",
         voxelization_logs: List[pd.DataFrame] = None
     ) -> plt.figure:
     """
@@ -307,9 +307,7 @@ def plot_capacity_vs_chamfer_dist(
     plotting.plot_capacity_vs_chamfer_dist(exps, type=["latent"], voxelization_logs=vox_logs)
     ```
     """
-    fig, ax = plt.subplots(1, len(type))
-    net_ax = ax[0] if "network" in type else None
-    lat_ax = ax[1] if "latent" in type else None
+    fig, ax = plt.subplots(1, 1)
     param_cnts = []
     latent_sizes = []
     cd_means = []
@@ -340,14 +338,14 @@ def plot_capacity_vs_chamfer_dist(
         cd_medians.append(eval_df["chamfer_dist"].median())
 
     # Plot.
-    if "network" in type:
-        net_ax.plot(param_cnts, cd_means, ls="-", label="SIREN mean CD")
-        net_ax.plot(param_cnts, cd_medians, ls="--", label="SIREN median CD")
-    elif "latent" in type:
-        lat_ax.plot(latent_sizes, cd_means, ls="-", label="SIREN mean CD")
-        lat_ax.plot(latent_sizes, cd_medians, ls="--", label="SIREN median CD")
+    if type == "network":
+        ax.plot(param_cnts, cd_means, ls="-", label="SIREN mean CD")
+        ax.plot(param_cnts, cd_medians, ls="--", label="SIREN median CD")
+    elif type == "latent":
+        ax.plot(latent_sizes, cd_means, ls="-", label="SIREN mean CD")
+        ax.plot(latent_sizes, cd_medians, ls="--", label="SIREN median CD")
         if voxelization_logs:
-            lat_ax.scatter(
+            ax.scatter(
                 [_["decimated_vertices"].mean() * 3 for _ in voxelization_logs], 
                 [_["cd"].mean() for _ in voxelization_logs], 
                 ls="--", label="Voxelization mean CD"

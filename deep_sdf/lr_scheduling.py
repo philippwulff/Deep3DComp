@@ -16,12 +16,19 @@ class StepLearningRateSchedule(LearningRateSchedule):
         self.initial = initial
         self.interval = interval
         self.factor = factor
-        self.last_lr = initial
 
     def get_learning_rate(self, epoch, *args, **kwargs):
 
         return self.initial * (self.factor ** (epoch // self.interval))
 
+
+class CyclicStepLearningRateSchedule(StepLearningRateSchedule):
+    def __init__(self, initial, interval, factor, max_lr_factor=1.5):
+        super().__init__(initial, interval, factor)
+
+    def get_learning_rate(self, epoch, *args, **kwargs):
+        lr = super().get_learning_rate(epoch, *args, **kwargs)
+        
 
 class StepLearningRateOnPlateauSchedule(LearningRateSchedule):
     def __init__(self, initial, factor, patience, threshold, min_lr, cooldown=0) -> None:
@@ -43,7 +50,7 @@ class StepLearningRateOnPlateauSchedule(LearningRateSchedule):
         self.patience = patience
         self.threshold = threshold
         self.last_lr = initial
-        self.last_step_epoch = 0
+        self.last_step_epoch = -99999       
         self.cooldown = cooldown
 
     def get_learning_rate(self, epoch, loss_log=[], *args, **kwargs):
