@@ -142,7 +142,7 @@ class SirenDecoder(nn.Module):
         NLS_AND_INITS = {
             "sine": (Sine(), sine_init, first_layer_sine_init),
             "relu": (nn.ReLU(), init_weights_normal, None),
-            "sine_relu_line": ((Sine(), nn.ReLU()), sine_init, first_layer_sine_init),
+            "sine_relu_line": ((nn.ReLU(), Sine()), sine_init, first_layer_sine_init),
             "sine_relu_plane": ((nn.ReLU(), Sine()), sine_init, first_layer_sine_init)
         }
         self.nonlinearity = nonlinearity
