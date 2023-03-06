@@ -1,4 +1,4 @@
-# Runs Quadriflow with decreasing vertex number on ShapeNet meshes until a certain chamfer distance between the GT mesh and the quadriflowed mesh is reached.
+# Runs mesh deceimation with decreasing vertex number on ShapeNet meshes until a certain chamfer distance between the GT mesh and the quadriflowed mesh is reached.
 
 import os
 import json

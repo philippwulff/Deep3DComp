@@ -10,6 +10,7 @@ import trimesh
 
 import deep_sdf
 import deep_sdf.workspace as ws
+import pytorch3d
 
 
 def evaluate(experiment_directory, checkpoint, data_dir, split_filename):
@@ -69,11 +70,12 @@ def evaluate(experiment_directory, checkpoint, data_dir, split_filename):
                     normalization_params["offset"],
                     normalization_params["scale"],
                 )
+                normal_consistency = deep_sdf.metrics.compute_metric(gen_mesh=reconstruction, metric="normal_consistency")
 
                 logging.debug("chamfer distance: " + str(chamfer_dist))
 
                 chamfer_results.append(
-                    (os.path.join(dataset, class_name, instance_name), chamfer_dist)
+                    (os.path.join(dataset, class_name, instance_name), chamfer_dist, normal_consistency)
                 )
 
     with open(
@@ -83,9 +85,9 @@ def evaluate(experiment_directory, checkpoint, data_dir, split_filename):
         "w",
     ) as f:
         # semicolon-separated CSV file
-        f.write("shape;chamfer_dist;all_chamfer_dist\n")
+        f.write("shape;chamfer_dist;all_chamfer_dist;normal_consistency\n")
         for result in chamfer_results:
-            f.write("{};{};{}\n".format(result[0], result[1][0], result[1][1]))
+            f.write("{};{};{};{}\n".format(result[0], result[1][0], result[1][1], result[2]))
 
 
 if __name__ == "__main__":

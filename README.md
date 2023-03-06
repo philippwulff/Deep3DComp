@@ -188,12 +188,14 @@ python preprocess_data.py --data_dir data --source [...]/ShapeNetCore.v2/ --name
 # reconstruct meshes from the sofa test split (after 2000 epochs)
 python reconstruct.py -e examples/sofas -c 2000 --split examples/splits/sv2_sofas_test.json -d data --skip
 python reconstruct.py -e examples/planes -c 2000 --split examples/splits/sv2_planes_test.json -d ../../shared/deepsdfcomp/data --skip
+python reconstruct.py -e ../../shared/deepsdfcomp/searches/double_nonlinearity/all_latentsize\=200_width\=256_lr\=5e-4_int\=150/ --split ../../shared/deepsdfcomp/experiments/splits/sv2_planes_test.json -d ../../shared/deepsdfcomp/data/ --skip
 
 python reconstruct.py -e examples/planes_single/ -c 2000 --split examples/splits/sv2_planes_train_single.json -d data --skip
 
 # evaluate the reconstructions
 python evaluate.py -e examples/sofas -c 2000 -d data -s examples/splits/sv2_sofas_test.json 
 python evaluate.py -e examples/planes -c 2000 -d ../../shared/deepsdfcomp/data/ -s examples/splits/sv2_planes_test.json 
+python evaluate.py -e ../../shared/deepsdfcomp/searches/double_nonlinearity/line -c 1070 -d ../../shared/deepsdfcomp/data/ -s examples/splits/sv2_planes_test.json
 ```
 
 ## Team

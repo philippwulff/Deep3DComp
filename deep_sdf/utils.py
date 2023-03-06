@@ -5,8 +5,38 @@ import logging
 import torch
 import trimesh
 import numpy as np
-from typing import Union 
+from typing import Union, List
 import math
+import os
+if not os.name == "nt":
+    # We do not import this on Windows.
+    from pytorch3d.structures import Meshes
+
+
+R_x = lambda rad: np.array([[1, 0,           0,            0],
+                            [0, np.cos(rad), -np.sin(rad), 0],
+                            [0, np.sin(rad), np.cos(rad),  0],
+                            [0, 0,           0,            1]])
+
+R_y = lambda rad: np.array([[np.cos(rad),  0, np.sin(rad), 0],
+                            [0,            1, 0,           0],
+                            [-np.sin(rad), 0, np.cos(rad), 0],
+                            [0,            0, 0,           1]])
+
+R_z = lambda rad: np.array([[np.cos(rad), -np.sin(rad), 0, 0],
+                            [np.sin(rad), np.cos(rad),  0, 0],
+                            [0,           0,            1, 0],
+                            [0,           0,            0, 1]])
+
+
+def rotate(x: np.array, alpha=0, beta=0, gamma=0) -> np.array:
+    """
+    Rotate a vector or matrix about 
+        - `alpha` rad around the X axis,
+        - `beta` rad around the Y axis and
+        - `gamma` rad around the Z axis.
+    """
+    return R_z(gamma) @ R_y(beta) @ R_x(alpha) @ x
 
 
 def add_common_args(arg_parser):
@@ -35,6 +65,7 @@ def add_common_args(arg_parser):
 
 def configure_logging(args):
     logger = logging.getLogger()
+    logger.handlers.clear()     # Remove existing default handlers.
     if args.debug:
         logger.setLevel(logging.DEBUG)
     elif args.quiet:
@@ -102,3 +133,24 @@ def comp_fc_net_frac_params(num_params, codelength, div):
     np = lz*(cl+3) + lz*lz*7 + lz
     """
     return - (codelength+4)/(7*2) + math.sqrt(((codelength+4)/(7*2))**2 + (num_params/(div*7)))
+
+
+def scale_to_unit_sphere(mesh):
+    """
+    From: https://github.com/marian42/mesh_to_sdf/blob/master/mesh_to_sdf/utils.py
+    """
+    if isinstance(mesh, trimesh.Scene):
+        mesh = mesh.dump().sum()
+
+    vertices = mesh.vertices - mesh.bounding_box.centroid
+    distances = np.linalg.norm(vertices, axis=1)
+    vertices /= np.max(distances)
+
+    return trimesh.Trimesh(vertices=vertices, faces=mesh.faces)
+
+
+def trimesh_to_pytorch3d_meshes(meshes: List[trimesh.Trimesh]):
+    """Converts a Trimesh into a Meshes object."""
+    verts = [torch.Tensor(_.vertices) for _ in meshes]
+    faces = [torch.Tensor(_.faces) for _ in meshes]
+    return Meshes(verts, faces)

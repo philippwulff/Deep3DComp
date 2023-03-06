@@ -5,6 +5,7 @@ data/*
 *.csv
 *.obj
 *.pyl
+**/3d_metrics
 
 # Log files, reconstructions
 **/LatentCodes

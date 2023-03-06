@@ -1,0 +1,33 @@
+# run: conda env create --file environment.yml
+name: deep3dcomp
+channels: 
+  - pytorch         # Channel ordering is important!
+  - nvidia          
+  - pytorch3d
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pytorch=1.13.0      # Later versions do not work with PyTorch3d.
+  - torchvision 
+  - torchaudio 
+  - pytorch-cuda=11.7   # NOTE: The version may differ on your system!
+  - pytorch3d           # Linux-only! Maybe comment this out on Windows.
+  - ipython
+  - pip
+  - pandas
+  - scipy
+  - matplotlib
+  - scikit-image>=0.19.3
+  - psutil
+  - trimesh
+  - plyfile
+  - scikit-learn
+  - pip:
+    - bpy
+    - mesh_to_sdf
+    - pyrender
+    - pyvista
+    - tensorboard
+    - point-cloud-utils
+    - rtree
+    # - ipykernel   # Might be needed if you run Jupyter Notebooks in VS Code
