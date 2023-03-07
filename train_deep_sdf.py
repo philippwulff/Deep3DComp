@@ -284,7 +284,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         batch_size=scene_per_batch,
         shuffle=True,
         num_workers=num_data_loader_threads,
-        drop_last=True,
+        drop_last=True,         # to avoid unstable gradients in last batch
     )
 
     # Get train evaluation settings.
@@ -503,8 +503,8 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                     grad_norm = _param.grad.detach().norm(p=2)
                     summary_writer.add_scalar(f"GradsNorm/{_name}.grad", grad_norm.item(), global_step=epoch)
                     grad_norms.append(grad_norm)
-            summary_writer.add_scalar(f"WeightsNorm/AllNetParams", torch.norm(torch.stack(grad_norms), p=2).item(), global_step=epoch)
-            summary_writer.add_scalar(f"WeightsNorm/AllLatParams", torch.norm(lat_vecs.weight.grad.detach(), p=2).item(), global_step=epoch)
+            summary_writer.add_scalar(f"GradsNorm/allNetParams", torch.norm(torch.stack(grad_norms), p=2).item(), global_step=epoch)
+            summary_writer.add_scalar(f"GradsNorm/allLatParams", torch.norm(lat_vecs.weight.grad.detach(), p=2).item(), global_step=epoch)
 
             # Save checkpoint.
             if epoch in checkpoints:
