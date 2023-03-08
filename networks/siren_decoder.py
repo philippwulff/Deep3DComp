@@ -163,7 +163,7 @@ class SirenDecoder(nn.Module):
 
             # if necessary add linear plane layer for activations
             if self.nonlinearity == "sine_relu_line":
-                setattr(self, "nl_line" + str(i), nn.Parameter(torch.ones((out_dim,))))
+                setattr(self, "nl_line" + str(i), nn.Parameter(0.5 * torch.ones((out_dim,))))
             elif self.nonlinearity == "sine_relu_plane":
                 setattr(self, "nl_plane" + str(i), nn.Parameter(torch.stack((torch.zeros((out_dim,)), torch.ones((out_dim,))), dim=1)))
 

@@ -22,6 +22,8 @@ import reconstruct
 
 from torch.utils.tensorboard import SummaryWriter
 
+shapenet_path = "C:/Users/Lenny/deep_compression/ext/data/ShapeNetCore.v2"
+
 
 def save_model(experiment_directory, filename, decoder, epoch):
 
@@ -273,7 +275,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         train_split = json.load(f)
 
     sdf_dataset = deep_sdf.data.SDFSamples(
-        data_source, train_split, num_samp_per_scene, load_ram=False
+        data_source, train_split, num_samp_per_scene, load_ram=True
     )
 
     num_data_loader_threads = get_spec_with_default(specs, "DataLoaderThreads", 1)
@@ -407,6 +409,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         train_chamfer_dists_log = []
         test_chamfer_dists_log = []
         for epoch in range(start_epoch, num_epochs + 1):
+            
 
             epoch_time_start = time.time()
             epoch_losses = []
@@ -418,6 +421,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
             adjust_learning_rate(lr_schedules, optimizer_all, epoch, loss_log_epoch)
             for sdf_data, indices in sdf_loader:
+                # logging.debug(f"time for dataloading: {(time.time() - TIME)*1000:.3f} ms"); TIME = time.time()
                 # Process the input data
                 sdf_data = sdf_data.reshape(-1, 4)
 
@@ -466,6 +470,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                     chunk_loss.backward()
 
                     batch_loss += chunk_loss.item()
+                    
                 
                     
                 logging.debug("loss = {}".format(batch_loss))
@@ -501,7 +506,8 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                 summary_writer.add_scalar(f"WeightsNorm/{_name}", _param.norm(p=2).item(), global_step=epoch)
                 if hasattr(_param, "grad") and _param.grad is not None:
                     summary_writer.add_scalar(f"GradsNorm/{_name}.grad", _param.grad.norm(p=2).item(), global_step=epoch)
-
+            
+            
             # Save checkpoint.
             if epoch in checkpoints:
                 save_checkpoints(epoch)
@@ -517,6 +523,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                     param_mag_log,
                     epoch,
                 )
+            
 
             # EVALUATION 
             if epoch % eval_train_frequency == 0:
@@ -546,7 +553,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                     logging.debug("[Train eval] Total time to create training mesh: {}".format(time.time() - start))
 
                     if train_mesh is not None:
-                        gt_mesh_path = f"/mnt/hdd/ShapeNetCore.v2/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
+                        gt_mesh_path = f"{shapenet_path}/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
                         cd, cd_all = metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=train_mesh, metric="chamfer")
                         chamfer_dists.append(cd)
                         chamfer_dists_all.append(cd_all)
@@ -618,7 +625,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                     logging.debug("[Test eval] Total time to create test mesh: {}".format(time.time() - start))
 
                     if test_mesh is not None:
-                        gt_mesh_path = f"/mnt/hdd/ShapeNetCore.v2/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
+                        gt_mesh_path = f"{shapenet_path}/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
                         cd, cd_all = metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=test_mesh, metric="chamfer")
                         chamfer_dists.append(cd)
                         chamfer_dists_all.append(cd_all)
@@ -642,7 +649,8 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                 # End of eval test.
 
             summary_writer.add_scalar("Time/epoch (min)", (time.time()-epoch_time_start)/60, epoch)
-            summary_writer.flush()    
+            summary_writer.flush() 
+               
             # End of epoch.
     except KeyboardInterrupt as e:
         logging.error(f"Received {e}. Cleaninh up and e  nding training.")
