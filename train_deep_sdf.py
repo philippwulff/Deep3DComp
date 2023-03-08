@@ -231,9 +231,9 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         save_optimizer(experiment_directory, str(epoch) + ".pth", optimizer_all, epoch)
         save_latent_vectors(experiment_directory, str(epoch) + ".pth", lat_vecs, epoch)
 
-    def signal_handler(sig, frame):
-        logging.info("Stopping early...")
-        sys.exit(0)
+    # def signal_handler(sig, frame):
+    #     logging.info("Stopping early...")
+    #     sys.exit(0)
 
     def adjust_learning_rate(lr_schedules, optimizer, epoch, loss_log):
         for i, param_group in enumerate(optimizer.param_groups):
@@ -247,7 +247,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         var = torch.var(lat_mat, 0)
         return mean, var
 
-    signal.signal(signal.SIGINT, signal_handler)
+    # signal.signal(signal.SIGINT, signal_handler)
 
     num_samp_per_scene = specs["SamplesPerScene"]
     scene_per_batch = specs["ScenesPerBatch"]
@@ -286,7 +286,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         batch_size=scene_per_batch,
         shuffle=True,
         num_workers=num_data_loader_threads,
-        drop_last=True,
+        drop_last=True,         # to avoid unstable gradients in last batch
     )
 
     # Get train evaluation settings.
@@ -470,16 +470,14 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                     chunk_loss.backward()
 
                     batch_loss += chunk_loss.item()
-                    
-                
-                    
+                                    
                 logging.debug("loss = {}".format(batch_loss))
                 loss_log.append(batch_loss)
                 epoch_losses.append(batch_loss)
 
                 if grad_clip is not None:
 
-                    torch.nn.utils.clip_grad_norm_(decoder.parameters(), grad_clip)
+                    torch.nn.utils.clip_grad_norm_(decoder.parameters(), grad_clip, norm_type=2)
 
                 optimizer_all.step()
 
@@ -500,14 +498,18 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             summary_writer.add_scalar("Mean Latent Magnitude/train", mlm, global_step=epoch)
             append_parameter_magnitudes(param_mag_log, decoder)
             # Log weights and gradient flow.
+            grad_norms = []
             for _name, _param in decoder.named_parameters():
                 if _name.startswith("module.decoder."):
                     _name = _name[15:]
                 summary_writer.add_scalar(f"WeightsNorm/{_name}", _param.norm(p=2).item(), global_step=epoch)
                 if hasattr(_param, "grad") and _param.grad is not None:
-                    summary_writer.add_scalar(f"GradsNorm/{_name}.grad", _param.grad.norm(p=2).item(), global_step=epoch)
-            
-            
+                    grad_norm = _param.grad.detach().norm(p=2)
+                    summary_writer.add_scalar(f"GradsNorm/{_name}.grad", grad_norm.item(), global_step=epoch)
+                    grad_norms.append(grad_norm)
+            summary_writer.add_scalar(f"GradsNorm/allNetParams.grad", torch.norm(torch.stack(grad_norms), p=2).item(), global_step=epoch)
+            summary_writer.add_scalar(f"GradsNorm/allLatParams.grad", torch.norm(lat_vecs.weight.grad.detach(), p=2).item(), global_step=epoch)
+
             # Save checkpoint.
             if epoch in checkpoints:
                 save_checkpoints(epoch)
@@ -653,7 +655,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                
             # End of epoch.
     except KeyboardInterrupt as e:
-        logging.error(f"Received {e}. Cleaninh up and e  nding training.")
+        logging.error(f"Received KeyboardInterrupt. Cleaning up and ending training.")
     finally:
         # Calculate model size.
         param_size = 0

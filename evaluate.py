@@ -13,7 +13,7 @@ import deep_sdf.workspace as ws
 import pytorch3d
 
 
-def evaluate(experiment_directory, checkpoint, data_dir, split_filename):
+def evaluate(experiment_directory, checkpoint, data_dir, split_filename, curvature_sampling=0.):
 
     with open(split_filename, "r") as f:
         split = json.load(f)
@@ -69,6 +69,7 @@ def evaluate(experiment_directory, checkpoint, data_dir, split_filename):
                     reconstruction,
                     normalization_params["offset"],
                     normalization_params["scale"],
+                    curvature_sampling=curvature_sampling
                 )
                 normal_consistency = deep_sdf.metrics.compute_metric(gen_mesh=reconstruction, metric="normal_consistency")
 
@@ -122,6 +123,14 @@ if __name__ == "__main__":
         required=True,
         help="The split to evaluate.",
     )
+    arg_parser.add_argument(
+        "--curvature_sampling",
+        "-cs",
+        dest="curvature_sampling",
+        default=0.,
+        required=False,
+        help="Amount of sampling wrt mesh curvature. 0 means smapling wrt. face area, 1 wrt. face curvature.",
+    )
 
     deep_sdf.add_common_args(arg_parser)
 
@@ -134,4 +143,5 @@ if __name__ == "__main__":
         args.checkpoint,
         args.data_source,
         args.split_filename,
+        args.curvature_sampling
     )

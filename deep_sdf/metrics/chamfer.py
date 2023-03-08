@@ -2,11 +2,13 @@
 # Copyright 2004-present Facebook. All Rights Reserved.
 
 import numpy as np
+import scipy
 from scipy.spatial import cKDTree as KDTree
 import trimesh
+import robust_laplacian
 
 
-def compute_trimesh_chamfer(gt_points, gen_mesh, offset, scale, num_mesh_samples=30000):
+def compute_trimesh_chamfer(gt_points, gen_mesh, offset, scale, num_mesh_samples=30000, curvature_sampling=0.):
     """This function computes a symmetric chamfer distance, i.e. the sum of both chamfers.
 
     gt_points: trimesh.points.PointCloud of just points, sampled from the surface (see
@@ -15,7 +17,28 @@ def compute_trimesh_chamfer(gt_points, gen_mesh, offset, scale, num_mesh_samples
               method (see compute_metrics.py for more)
     """
     try:
-        gen_points_sampled = trimesh.sample.sample_surface(gen_mesh, num_mesh_samples)[0]
+        # compute laplacian 
+        l, m = robust_laplacian.mesh_laplacian(np.array(gen_mesh.vertices), np.array(gen_mesh.faces))
+        minv = scipy.sparse.diags(1 / m.diagonal())
+        Lap = -minv.dot(l)
+        
+        # compute mean curvature for vertices. Clip at median
+        curvatures = np.linalg.norm(Lap.dot(gen_mesh.vertices), axis=1)
+        curvatures = np.clip(curvatures, np.percentile(curvatures, 0.00), np.percentile(curvatures, 50))
+
+        # create face weights proportional to area and mean face curvature
+        face_curvatures = curvatures[gen_mesh.faces].mean(axis=1)
+        face_areas = trimesh.triangles.area(gen_mesh.triangles)
+        face_curvatures = np.interp(face_curvatures,
+                                    (face_curvatures.min(), face_curvatures.max()),
+                                    (0, 1))
+        face_areas = np.interp(face_areas,
+                            (face_areas.min(), face_areas.max()),
+                            (0, 1))
+        weights = curvature_sampling * face_curvatures + (1 - curvature_sampling) * face_areas
+        
+        # sample points with appropriate weighting
+        gen_points_sampled = trimesh.sample.sample_surface(gen_mesh, num_mesh_samples, face_weight=weights)[0]
     except IndexError as e:
         raise IndexError
 
