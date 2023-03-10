@@ -6,6 +6,8 @@ from typing import Union, List, Dict
 import os
 import deep_sdf.workspace as ws
 from deep_sdf import utils, metrics
+import sklearn
+from sklearn.manifold import TSNE
 import trimesh
 import math
 import pandas as pd
@@ -312,7 +314,7 @@ def plot_capacity_vs_chamfer_dist(
     exps = {
         "net": [] if not exp_dirs_net_capacity else exp_dirs_net_capacity,
         "lat": [] if not exp_dirs_lat_capacity else exp_dirs_lat_capacity,
-        "vox": [] if not voxelization_logs else voxelization_logs,
+        "vox": [] if not voxelization_logs else [pd.read_csv(_) for _ in voxelization_logs],
     }
     assert any([exps["net"], exps["lat"], exps["vox"]]), "NO EXPERIMENT DIRS GIVEN"
 
@@ -376,8 +378,6 @@ def plot_capacity_vs_chamfer_dist(
             ax.scatter(x, y, marker="x", label="Voxelization mean CD", color="red")
             # numpy.polyfit(numpy.log(x), y, 1)
             # plt.plot(np.unique(x), np.poly1d(np.polyfit(x, y, 1))(np.unique(x)), ls="-.", c="red")
-            exp_func_args = np.polyfit(np.log(x), y, 1)            
-            plt.plot(np.unique(x), exp_func_args[0]*np.log(np.unique(x))+exp_func_args[1], ls="-.", c="red")
 
             if "num_sparse_voxels" in result:
                 pass
@@ -387,3 +387,12 @@ def plot_capacity_vs_chamfer_dist(
 
     plt.close()
     return fig
+
+
+def plot_manifold_tsne(exps, checkpoint=2000):
+    for exp in exps:
+        X = ws.load_latent_vectors(exp, checkpoint)
+
+        X_embedded = TSNE(n_components=2, learning_rate='auto', init='random', perplexity=3).fit_transform(X)
+
+    return
