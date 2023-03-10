@@ -11,6 +11,7 @@ import math
 import pandas as pd
 import matplotlib.animation as animation
 from matplotlib.lines import Line2D
+from collections import defaultdict
 if not os.name == "nt":
     # We do not import this on Windows.
     import pyrender
@@ -292,9 +293,10 @@ def plot_sdf_cross_section(points: np.array, sdf: np.array, margin=0.05, plane_o
 
 
 def plot_capacity_vs_chamfer_dist(
-        exp_dirs: List, checkpoint: int = 2000, 
-        type: str = "network",
-        voxelization_logs: List[pd.DataFrame] = None
+        exp_dirs_net_capacity: List = None, 
+        exp_dirs_lat_capacity: List = None,
+        voxelization_logs: List[pd.DataFrame] = None,
+        checkpoint: int = 2000, 
     ) -> plt.figure:
     """
     Example usage: 
@@ -307,53 +309,81 @@ def plot_capacity_vs_chamfer_dist(
     plotting.plot_capacity_vs_chamfer_dist(exps, type=["latent"], voxelization_logs=vox_logs)
     ```
     """
-    fig, ax = plt.subplots(1, 1)
-    param_cnts = []
-    latent_sizes = []
-    cd_means = []
-    cd_medians = []
-    for exp_dir in exp_dirs:
-        # Read experiment specs.
-        specs = ws.load_experiment_specifications(exp_dir)
-        arch = __import__("networks." + specs["NetworkArch"], fromlist=["Decoder"])
-        latent_size = specs["CodeLength"]
-        decoder = arch.Decoder(latent_size, **specs["NetworkSpecs"])
-        latent_sizes.append(latent_size)
-        # Calculate model size.
-        param_size = 0
-        param_cnt = 0
-        for param in decoder.parameters():
-            param_size += param.nelement() * param.element_size()
-            param_cnt += param.nelement()
-        buffer_size = 0
-        for buffer in decoder.buffers():
-            buffer_size += buffer.nelement() * buffer.element_size()
-        model_size_mb = (param_size + buffer_size) / 1024**2
-        param_cnts.append(param_cnt)
-        # Read evaluation results.
-        eval_log_path = os.path.join(ws.get_evaluation_dir(exp_dir, str(checkpoint)), "chamfer.csv")
-        ws.get_model_params_dir(exp_dir)
-        eval_df = pd.read_csv(eval_log_path, delimiter=";")
-        cd_means.append(eval_df["chamfer_dist"].mean())
-        cd_medians.append(eval_df["chamfer_dist"].median())
+    exps = {
+        "net": [] if not exp_dirs_net_capacity else exp_dirs_net_capacity,
+        "lat": [] if not exp_dirs_lat_capacity else exp_dirs_lat_capacity,
+        "vox": [] if not voxelization_logs else voxelization_logs,
+    }
+    assert any([exps["net"], exps["lat"], exps["vox"]]), "NO EXPERIMENT DIRS GIVEN"
+
+    # Combine all results from different experiments.
+    results = defaultdict(lambda: defaultdict(list))
+    for name, exp_dirs in exps.items():
+        for exp_dir in exp_dirs:
+            if name == "vox":
+                results[name]["voxel_resolutions"].append(exp_dir["voxel_resolution"].mean())
+                # +2 because we did not add the padding in the logged results
+                results[name]["num_voxels"].append((exp_dir["voxel_resolution"].mean()+2)**3)     
+                results[name]["cd_means"].append(exp_dir["cd"].mean())
+                try:
+                    results[name]["num_sparse_voxels"].append(exp_dir["num_sparse_voxels"])
+                except KeyError:
+                    pass
+            else:
+                # Read experiment specs.
+                specs = ws.load_experiment_specifications(exp_dir)
+                arch = __import__("networks." + specs["NetworkArch"], fromlist=["Decoder"])
+                latent_size = specs["CodeLength"]
+                decoder = arch.Decoder(latent_size, **specs["NetworkSpecs"])
+                results[name]["latent_sizes"].append(latent_size)
+                # Calculate model size.
+                param_size = 0
+                param_cnt = 0
+                for param in decoder.parameters():
+                    param_size += param.nelement() * param.element_size()
+                    param_cnt += param.nelement()
+                buffer_size = 0
+                for buffer in decoder.buffers():
+                    buffer_size += buffer.nelement() * buffer.element_size()
+                model_size_mb = (param_size + buffer_size) / 1024**2
+                results[name]["param_cnts"].append(param_cnt)
+                # Read evaluation results.
+                eval_log_path = os.path.join(ws.get_evaluation_dir(exp_dir, str(checkpoint)), "chamfer.csv")
+                ws.get_model_params_dir(exp_dir)
+                eval_df = pd.read_csv(eval_log_path, delimiter=";")
+                results[name]["cd_means"].append(eval_df["chamfer_dist"].mean())
+                results[name]["cd_medians"].append(eval_df["chamfer_dist"].median())
 
     # Plot.
-    if type == "network":
-        ax.plot(param_cnts, cd_means, ls="-", label="SIREN mean CD")
-        ax.plot(param_cnts, cd_medians, ls="--", label="SIREN median CD")
-    elif type == "latent":
-        ax.plot(latent_sizes, cd_means, ls="-", label="SIREN mean CD")
-        ax.plot(latent_sizes, cd_medians, ls="--", label="SIREN median CD")
-        if voxelization_logs:
-            ax.scatter(
-                [_["decimated_vertices"].mean() * 3 for _ in voxelization_logs], 
-                [_["cd"].mean() for _ in voxelization_logs], 
-                ls="--", label="Voxelization mean CD"
-            )
+    fig, axes = plt.subplots(1, len([_ for _ in exps if exps[_]]))
+    for i, (name, result) in enumerate(results.items()):
+        ax = axes[i] if isinstance(axes, np.ndarray) else axes
+        if name in ["net", "lat"]:
+            ax.set_title(f"# of {name} params vs. Chamfer distance")
+            ax.set_ylabel("Chamfer distance")
+            ax.set_xlabel(f"# of {name} params")
+            x_values = result["param_cnts"] if name == "net" else result["latent_sizes"]
+            ax.plot(x_values, result["cd_means"], ls="-", label="SIREN mean CD")
+            ax.plot(x_values, result["cd_medians"], ls="--", label="SIREN median CD")
+        elif name == "vox":
+            ax.set_title(f"# of voxels vs. Chamfer distance")
+            ax.set_ylabel("Chamfer distance")
+            ax.set_xlabel(f"# of voxels")
+            num_voxels = np.array(result["num_voxels"])
+            cd_means = np.array(result["cd_means"])
+            idxs = num_voxels.argsort()
+            x, y = num_voxels[idxs], cd_means[idxs]
+            ax.scatter(x, y, marker="x", label="Voxelization mean CD", color="red")
+            # numpy.polyfit(numpy.log(x), y, 1)
+            # plt.plot(np.unique(x), np.poly1d(np.polyfit(x, y, 1))(np.unique(x)), ls="-.", c="red")
+            exp_func_args = np.polyfit(np.log(x), y, 1)            
+            plt.plot(np.unique(x), exp_func_args[0]*np.log(np.unique(x))+exp_func_args[1], ls="-.", c="red")
 
-    ax.set_title(f"# of {type} params vs. Chamfer distance")
-    ax.set_ylabel("Chamfer distance")
-    ax.set_xlabel(f"# of {type} params")
-    ax.legend()
+            if "num_sparse_voxels" in result:
+                pass
+
+
+        ax.legend()
+
     plt.close()
     return fig
