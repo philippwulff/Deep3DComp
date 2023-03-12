@@ -271,7 +271,6 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
     with open(train_split_file, "r") as f:
         train_split = json.load(f)
 
-    shapenet_path = "C:/Users/Lenny/deep_compression/ext/data/ShapeNetCore.v2"
     shapenet_path = get_spec_with_default(specs, "ShapeNetPath", "/mnt/hdd/ShapeNetCore.v2")
     if not os.path.exists(shapenet_path):
         logging.error(f"Running w/o validation, since the specified ShapeNet path does not exist: {shapenet_path}")
