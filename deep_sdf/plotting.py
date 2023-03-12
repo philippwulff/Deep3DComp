@@ -14,6 +14,12 @@ import pandas as pd
 import matplotlib.animation as animation
 from matplotlib.lines import Line2D
 from collections import defaultdict
+import matplotlib
+from matplotlib.patches import Patch
+from matplotlib.lines import Line2D
+from matplotlib.gridspec import GridSpec
+
+import json
 if not os.name == "nt":
     # We do not import this on Windows.
     import pyrender
@@ -328,7 +334,8 @@ def plot_capacity_vs_chamfer_dist(
                 results[name]["num_voxels"].append((exp_dir["voxel_resolution"].mean()+2)**3)     
                 results[name]["cd_means"].append(exp_dir["cd"].mean())
                 try:
-                    results[name]["num_sparse_voxels"].append(exp_dir["num_sparse_voxels"])
+                    results[name]["num_sparse_voxels"].append(exp_dir["num_sparse_voxels"].mean())
+                    results[name]["sparse_cd_means"].append(exp_dir["sparse_cd"].mean())
                 except KeyError:
                     pass
             else:
@@ -368,19 +375,24 @@ def plot_capacity_vs_chamfer_dist(
             ax.plot(x_values, result["cd_means"], ls="-", label="SIREN mean CD")
             ax.plot(x_values, result["cd_medians"], ls="--", label="SIREN median CD")
         elif name == "vox":
-            ax.set_title(f"# of voxels vs. Chamfer distance")
+            ax.set_title(f"Voxel count vs. Reconstruction Chamfer distance")
             ax.set_ylabel("Chamfer distance")
-            ax.set_xlabel(f"# of voxels")
+            ax.set_xlabel(f"Voxels count")
             num_voxels = np.array(result["num_voxels"])
             cd_means = np.array(result["cd_means"])
             idxs = num_voxels.argsort()
             x, y = num_voxels[idxs], cd_means[idxs]
-            ax.scatter(x, y, marker="x", label="Voxelization mean CD", color="red")
+            ax.scatter(x, y, marker="x", label="Dense Voxel Grid", color="red")
             # numpy.polyfit(numpy.log(x), y, 1)
             # plt.plot(np.unique(x), np.poly1d(np.polyfit(x, y, 1))(np.unique(x)), ls="-.", c="red")
 
             if "num_sparse_voxels" in result:
-                pass
+                num_voxels = np.array(result["num_sparse_voxels"])
+                cd_means = np.array(result["sparse_cd_means"])
+                idxs = num_voxels.argsort()
+                x, y = num_voxels[idxs], cd_means[idxs]
+                ax.scatter(x, y, marker="x", label="Sparse Voxel Grid", color="orange")
+                ax.set_xscale('log')
 
 
         ax.legend()
@@ -389,10 +401,69 @@ def plot_capacity_vs_chamfer_dist(
     return fig
 
 
-def plot_manifold_tsne(exps, checkpoint=2000):
-    for exp in exps:
-        X = ws.load_latent_vectors(exp, checkpoint)
+def plot_manifold_tsne(exp, checkpoint=2000):
+    wordnet_relations_df = pd.read_csv("data/shapenet_wordnet_relations.csv")
+    cmap = matplotlib.cm.get_cmap("tab20")
+    num_colors = 20
+    nrows = 7
+    ncols = 4
+    default_color = "black"
 
-        X_embedded = TSNE(n_components=2, learning_rate='auto', init='random', perplexity=3).fit_transform(X)
+    def wrap_text(text, max_text_len = 25):
+        return "\n".join([text[y-max_text_len:y] for y in range(max_text_len, len(text)+max_text_len,max_text_len)])
 
-    return
+    # Create t-SNE.
+    lat_vecs = ws.load_latent_vectors(exp, str(checkpoint))
+    lat_vecs_embedded = TSNE(n_components=2, perplexity=3).fit_transform(lat_vecs)
+
+    # Load the shape information files.
+    with open(os.path.join(exp, ws.specifications_filename), "r") as f:
+        specs = json.load(f)
+        with open(specs["TrainSplit"], "r") as split_f:
+            split = json.load(split_f)
+    dataset_name = list(split.keys())[0]
+    synset_id, shape_ids = list(split[dataset_name].items())[0]
+    
+    # The word class belonging to each latent vector.
+    wnlemmas = wordnet_relations_df.set_index("fullId").loc[["3dw."+_ for _ in shape_ids], "wnlemmas"]
+    # Count the occurences of each class.
+    wnlemmas_cnts = wnlemmas.value_counts()
+    top_n_wnlemmas = wnlemmas_cnts[:num_colors].index
+    cdict = dict(zip(top_n_wnlemmas, cmap(np.linspace(0, 1, num_colors))))
+    colors = [cdict.get(_, default_color) for _ in wnlemmas]
+
+    # Plot.
+    gs = GridSpec(nrows, ncols, hspace=0.5)
+    fig = plt.figure(figsize=(ncols*3, nrows*3.5))
+
+    # Plot points from all classes.
+    ax_main = fig.add_subplot(gs[:2, :2])
+    ax_main.scatter(lat_vecs_embedded[:, 0], lat_vecs_embedded[:, 1], s=5, c=colors)
+    i = 0
+    for r in range(nrows):
+        for c in range(ncols):
+            # if r < 1 or (r < 2 and c < 2):
+            if r < 2 or i >= len(top_n_wnlemmas):
+                continue
+            ax = fig.add_subplot(gs[r, c])
+            wnlemma = top_n_wnlemmas[i]
+            wnlemma_lat_vecs_indxs = [_ for _ in range(len(lat_vecs)) if wnlemmas.iloc[_] == wnlemma]
+            wnlemma_lat_vecs = lat_vecs_embedded[wnlemma_lat_vecs_indxs, :]
+            color = cdict[wnlemma]
+            ax.scatter(wnlemma_lat_vecs[:, 0], wnlemma_lat_vecs[:, 1], s=5, color=color)
+            ax.set_title(wrap_text(wnlemma))
+            i += 1
+
+    # Legend and style the plot.
+    name_cnts = wnlemmas_cnts[:num_colors]
+    other_cnts = len(wnlemmas) - sum(name_cnts)
+    legend_elements = [
+        *[Line2D([0], [0], marker='o', color='w', label=wrap_text(f"{name} ({name_cnts[i]})", 70), markerfacecolor=color, markersize=10) for i, (name, color) in enumerate(cdict.items())],
+        Line2D([0], [0], marker='o', color='w', label=f"Others ({other_cnts})", markerfacecolor=default_color, markersize=10)
+    ]
+    ax_main.legend(handles=legend_elements, bbox_to_anchor=(1.04, 1), loc="upper left", borderaxespad=0, prop={'size': 9})
+    ax_main.set_title("t-SNE plot of latent space")
+
+    # fig.tight_layout()
+    plt.close()
+    return fig
