@@ -22,8 +22,6 @@ import reconstruct
 
 from torch.utils.tensorboard import SummaryWriter
 
-shapenet_path = "C:/Users/Lenny/deep_compression/ext/data/ShapeNetCore.v2"
-
 
 def save_model(experiment_directory, filename, decoder, epoch):
 
@@ -265,7 +263,6 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
     logging.info("training with {} GPU(s)".format(torch.cuda.device_count()))
 
-    # if torch.cuda.device_count() > 1:
     decoder = torch.nn.DataParallel(decoder)
 
     num_epochs = specs["NumEpochs"]
@@ -274,8 +271,14 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
     with open(train_split_file, "r") as f:
         train_split = json.load(f)
 
+    shapenet_path = "C:/Users/Lenny/deep_compression/ext/data/ShapeNetCore.v2"
+    shapenet_path = get_spec_with_default(specs, "ShapeNetPath", "/mnt/hdd/ShapeNetCore.v2")
+    if not os.path.exists(shapenet_path):
+        logging.error(f"Running w/o validation, since the specified ShapeNet path does not exist: {shapenet_path}")
+        shapenet_path = None
+    load_ram = get_spec_with_default(specs, "LoadDatasetIntoRAM", False)
     sdf_dataset = deep_sdf.data.SDFSamples(
-        data_source, train_split, num_samp_per_scene, load_ram=True
+        data_source, train_split, num_samp_per_scene, load_ram=load_ram
     )
 
     num_data_loader_threads = get_spec_with_default(specs, "DataLoaderThreads", 1)
@@ -528,127 +531,129 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             
 
             # EVALUATION 
-            if epoch % eval_train_frequency == 0:
-                # Training-set evaluation: Reconstruct mesh from learned latent and compute metrics.
-                chamfer_dists = []
-                chamfer_dists_all = []
-                eval_train_time_start = time.time()
-                for index in eval_train_scene_idxs:
-                    lat_vec = lat_vecs(torch.LongTensor([index])).cuda()
-                    mesh_class_id = sdf_dataset.npyfiles[index].split(".npz")[0].split(os.sep)[-2]
-                    mesh_shape_id = sdf_dataset.npyfiles[index].split(".npz")[0].split(os.sep)[-1]
-                    save_name = mesh_class_id + "_" + mesh_shape_id
-                    path = os.path.join(experiment_directory, ws.tb_logs_dir, ws.tb_logs_train_reconstructions, save_name)
-                    if not os.path.exists(path):
-                        os.makedirs(path)
+            if shapenet_path:
+                # Only if the path to the GT meshes exists.
+                if epoch % eval_train_frequency == 0:
+                    # Training-set evaluation: Reconstruct mesh from learned latent and compute metrics.
+                    chamfer_dists = []
+                    chamfer_dists_all = []
+                    eval_train_time_start = time.time()
+                    for index in eval_train_scene_idxs:
+                        lat_vec = lat_vecs(torch.LongTensor([index])).cuda()
+                        mesh_class_id = sdf_dataset.npyfiles[index].split(".npz")[0].split(os.sep)[-2]
+                        mesh_shape_id = sdf_dataset.npyfiles[index].split(".npz")[0].split(os.sep)[-1]
+                        save_name = mesh_class_id + "_" + mesh_shape_id
+                        path = os.path.join(experiment_directory, ws.tb_logs_dir, ws.tb_logs_train_reconstructions, save_name)
+                        if not os.path.exists(path):
+                            os.makedirs(path)
 
-                    start = time.time()
-                    with torch.no_grad():
-                        train_mesh = mesh.create_mesh(
-                            decoder, 
-                            lat_vec, 
-                            N=eval_grid_res, 
-                            max_batch=int(2 ** 18), 
-                            filename=os.path.join(path, f"epoch={epoch}"),
-                            return_trimesh=True,
+                        start = time.time()
+                        with torch.no_grad():
+                            train_mesh = mesh.create_mesh(
+                                decoder, 
+                                lat_vec, 
+                                N=eval_grid_res, 
+                                max_batch=int(2 ** 18), 
+                                filename=os.path.join(path, f"epoch={epoch}"),
+                                return_trimesh=True,
+                            )
+                        logging.debug("[Train eval] Total time to create training mesh: {}".format(time.time() - start))
+
+                        if train_mesh is not None:
+                            gt_mesh_path = f"{shapenet_path}/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
+                            cd, cd_all = metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=train_mesh, metric="chamfer")
+                            chamfer_dists.append(cd)
+                            chamfer_dists_all.append(cd_all)
+                        
+                        del train_mesh, mesh_class_id, mesh_shape_id, save_name
+
+                    if chamfer_dists:
+                        logging.debug(f"Chamfer distance mean: {sum(chamfer_dists)/len(chamfer_dists)} from {chamfer_dists}.")            
+                        summary_writer.add_scalar("Mean Chamfer Dist/train", sum(chamfer_dists)/len(chamfer_dists), epoch)
+                        fig, percentiles = plotting.plot_dist_violin(np.concatenate(chamfer_dists_all, axis=0))
+                        summary_writer.add_figure("CD Percentiles/train dists", fig, global_step=epoch)
+                        for p in [75, 90, 99]:
+                            if p in percentiles:
+                                summary_writer.add_scalar(f"CD Percentiles/train {p}th", percentiles[p], global_step=epoch)
+                    summary_writer.add_scalar("Time/train eval per shape (sec)", (time.time()-eval_train_time_start)/len(eval_test_filenames), epoch)
+                    # End of eval train.
+                
+                if epoch % eval_test_frequency == 0:
+                    # Test-set evaluation: Reconstruct latent and mesh from GT sdf values and compute metrics.
+                    eval_test_time_start = time.time()
+                    test_err_sum = 0.
+                    chamfer_dists = []
+                    chamfer_dists_all = []
+                    test_loss_hists = []
+                    mesh_label_names = []
+                    test_latents = []
+                    for test_fname in eval_test_filenames:
+                        mesh_class_id = test_fname.split(".npz")[0].split(os.sep)[-2]
+                        mesh_shape_id = test_fname.split(".npz")[0].split(os.sep)[-1]
+                        mesh_label_names.append(f"{mesh_class_id}_{mesh_shape_id}")
+                        save_name = mesh_class_id + "_" + mesh_shape_id
+                        path = os.path.join(experiment_directory, ws.tb_logs_dir, ws.tb_logs_test_reconstructions, save_name)
+                        if not os.path.exists(path):
+                            os.makedirs(path)
+                        test_fpath = os.path.join(data_source, ws.sdf_samples_subdir, test_fname)
+                        test_sdf_samples = deep_sdf.data.read_sdf_samples_into_ram(test_fpath)
+                        test_sdf_samples[0] = test_sdf_samples[0][torch.randperm(test_sdf_samples[0].shape[0])]
+                        test_sdf_samples[1] = test_sdf_samples[1][torch.randperm(test_sdf_samples[1].shape[0])]
+
+                        start = time.time()
+                        test_loss_hist, test_latent = reconstruct.reconstruct(
+                            decoder,
+                            int(eval_test_optimization_steps),
+                            latent_size,
+                            test_sdf_samples,
+                            0.01,  # [emp_mean,emp_var],
+                            0.1,
+                            num_samples=8000,
+                            lr=5e-3,
+                            l2reg=True,
+                            return_loss_hist=True
                         )
-                    logging.debug("[Train eval] Total time to create training mesh: {}".format(time.time() - start))
+                        logging.debug("[Test eval] Total reconstruction time: {}".format(time.time() - start))
+                        if not np.isnan(test_loss_hist[-1]):
+                            test_err_sum += test_loss_hist[-1]
+                        test_loss_hists.append(test_loss_hist)
+                        test_latents.append(test_latent)
 
-                    if train_mesh is not None:
-                        gt_mesh_path = f"{shapenet_path}/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
-                        cd, cd_all = metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=train_mesh, metric="chamfer")
-                        chamfer_dists.append(cd)
-                        chamfer_dists_all.append(cd_all)
-                    
-                    del train_mesh, mesh_class_id, mesh_shape_id, save_name
+                        start = time.time()
+                        with torch.no_grad():
+                            test_mesh = mesh.create_mesh(
+                                decoder, 
+                                test_latent, 
+                                N=eval_grid_res, 
+                                max_batch=int(2 ** 18), 
+                                filename=os.path.join(path, f"epoch={epoch}"),
+                                return_trimesh=True,
+                            )
+                        logging.debug("[Test eval] Total time to create test mesh: {}".format(time.time() - start))
 
-                if chamfer_dists:
-                    logging.debug(f"Chamfer distance mean: {sum(chamfer_dists)/len(chamfer_dists)} from {chamfer_dists}.")            
-                    summary_writer.add_scalar("Mean Chamfer Dist/train", sum(chamfer_dists)/len(chamfer_dists), epoch)
-                    fig, percentiles = plotting.plot_dist_violin(np.concatenate(chamfer_dists_all, axis=0))
-                    summary_writer.add_figure("CD Percentiles/train dists", fig, global_step=epoch)
-                    for p in [75, 90, 99]:
-                        if p in percentiles:
-                            summary_writer.add_scalar(f"CD Percentiles/train {p}th", percentiles[p], global_step=epoch)
-                summary_writer.add_scalar("Time/train eval per shape (sec)", (time.time()-eval_train_time_start)/len(eval_test_filenames), epoch)
-                # End of eval train.
-            
-            if epoch % eval_test_frequency == 0:
-                # Test-set evaluation: Reconstruct latent and mesh from GT sdf values and compute metrics.
-                eval_test_time_start = time.time()
-                test_err_sum = 0.
-                chamfer_dists = []
-                chamfer_dists_all = []
-                test_loss_hists = []
-                mesh_label_names = []
-                test_latents = []
-                for test_fname in eval_test_filenames:
-                    mesh_class_id = test_fname.split(".npz")[0].split(os.sep)[-2]
-                    mesh_shape_id = test_fname.split(".npz")[0].split(os.sep)[-1]
-                    mesh_label_names.append(f"{mesh_class_id}_{mesh_shape_id}")
-                    save_name = mesh_class_id + "_" + mesh_shape_id
-                    path = os.path.join(experiment_directory, ws.tb_logs_dir, ws.tb_logs_test_reconstructions, save_name)
-                    if not os.path.exists(path):
-                        os.makedirs(path)
-                    test_fpath = os.path.join(data_source, ws.sdf_samples_subdir, test_fname)
-                    test_sdf_samples = deep_sdf.data.read_sdf_samples_into_ram(test_fpath)
-                    test_sdf_samples[0] = test_sdf_samples[0][torch.randperm(test_sdf_samples[0].shape[0])]
-                    test_sdf_samples[1] = test_sdf_samples[1][torch.randperm(test_sdf_samples[1].shape[0])]
+                        if test_mesh is not None:
+                            gt_mesh_path = f"{shapenet_path}/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
+                            cd, cd_all = metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=test_mesh, metric="chamfer")
+                            chamfer_dists.append(cd)
+                            chamfer_dists_all.append(cd_all)
 
-                    start = time.time()
-                    test_loss_hist, test_latent = reconstruct.reconstruct(
-                        decoder,
-                        int(eval_test_optimization_steps),
-                        latent_size,
-                        test_sdf_samples,
-                        0.01,  # [emp_mean,emp_var],
-                        0.1,
-                        num_samples=8000,
-                        lr=5e-3,
-                        l2reg=True,
-                        return_loss_hist=True
-                    )
-                    logging.debug("[Test eval] Total reconstruction time: {}".format(time.time() - start))
-                    if not np.isnan(test_loss_hist[-1]):
-                        test_err_sum += test_loss_hist[-1]
-                    test_loss_hists.append(test_loss_hist)
-                    test_latents.append(test_latent)
+                        del test_sdf_samples, test_mesh
 
-                    start = time.time()
-                    with torch.no_grad():
-                        test_mesh = mesh.create_mesh(
-                            decoder, 
-                            test_latent, 
-                            N=eval_grid_res, 
-                            max_batch=int(2 ** 18), 
-                            filename=os.path.join(path, f"epoch={epoch}"),
-                            return_trimesh=True,
-                        )
-                    logging.debug("[Test eval] Total time to create test mesh: {}".format(time.time() - start))
-
-                    if test_mesh is not None:
-                        gt_mesh_path = f"{shapenet_path}/{mesh_class_id}/{mesh_shape_id}/models/model_normalized.obj"
-                        cd, cd_all = metrics.compute_metric(gt_mesh=gt_mesh_path, gen_mesh=test_mesh, metric="chamfer")
-                        chamfer_dists.append(cd)
-                        chamfer_dists_all.append(cd_all)
-
-                    del test_sdf_samples, test_mesh
-
-                if chamfer_dists:
-                    logging.debug(f"Test Chamfer distance mean: {sum(chamfer_dists)/len(chamfer_dists)} from {chamfer_dists}.")            
-                    summary_writer.add_scalar("Mean Chamfer Dist/test", sum(chamfer_dists)/len(chamfer_dists), epoch)
-                    summary_writer.add_scalar("Loss/test", test_err_sum/len(eval_test_filenames), epoch)
-                    mlm = torch.mean(torch.norm(torch.cat(test_latents, dim=0), dim=1))
-                    summary_writer.add_scalar("Mean Latent Magnitude/test", mlm, global_step=epoch)
-                    fig = plotting.plot_train_stats(loss_hists=test_loss_hists, labels=mesh_label_names)
-                    summary_writer.add_figure("Loss/test optimization curves", fig, epoch)
-                    fig, percentiles = plotting.plot_dist_violin(np.concatenate(chamfer_dists_all, axis=0))
-                    summary_writer.add_figure("CD Percentiles/test dists", fig, global_step=epoch)
-                    for p in [75, 90, 99]:
-                        if p in percentiles:
-                            summary_writer.add_scalar(f"CD Percentiles/test {p}th", percentiles[p], global_step=epoch)
-                summary_writer.add_scalar("Time/test eval per shape (sec)", (time.time()-eval_test_time_start)/len(eval_test_filenames), epoch)
-                # End of eval test.
+                    if chamfer_dists:
+                        logging.debug(f"Test Chamfer distance mean: {sum(chamfer_dists)/len(chamfer_dists)} from {chamfer_dists}.")            
+                        summary_writer.add_scalar("Mean Chamfer Dist/test", sum(chamfer_dists)/len(chamfer_dists), epoch)
+                        summary_writer.add_scalar("Loss/test", test_err_sum/len(eval_test_filenames), epoch)
+                        mlm = torch.mean(torch.norm(torch.cat(test_latents, dim=0), dim=1))
+                        summary_writer.add_scalar("Mean Latent Magnitude/test", mlm, global_step=epoch)
+                        fig = plotting.plot_train_stats(loss_hists=test_loss_hists, labels=mesh_label_names)
+                        summary_writer.add_figure("Loss/test optimization curves", fig, epoch)
+                        fig, percentiles = plotting.plot_dist_violin(np.concatenate(chamfer_dists_all, axis=0))
+                        summary_writer.add_figure("CD Percentiles/test dists", fig, global_step=epoch)
+                        for p in [75, 90, 99]:
+                            if p in percentiles:
+                                summary_writer.add_scalar(f"CD Percentiles/test {p}th", percentiles[p], global_step=epoch)
+                    summary_writer.add_scalar("Time/test eval per shape (sec)", (time.time()-eval_test_time_start)/len(eval_test_filenames), epoch)
+                    # End of eval test.
 
             summary_writer.add_scalar("Time/epoch (min)", (time.time()-epoch_time_start)/60, epoch)
             summary_writer.flush() 
