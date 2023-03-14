@@ -6,6 +6,7 @@ import scipy
 from scipy.spatial import cKDTree as KDTree
 import trimesh
 import robust_laplacian
+from deep_sdf.utils import scale_to_unit_sphere
 
 
 def compute_trimesh_chamfer(gt_points, gen_mesh, offset, scale, num_mesh_samples=30000, curvature_sampling=0.):
