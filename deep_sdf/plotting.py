@@ -331,7 +331,7 @@ def plot_capacity_vs_chamfer_dist(
             if name == "vox":
                 results[name]["voxel_resolutions"].append(exp_dir["voxel_resolution"].mean())
                 # +2 because we did not add the padding in the logged results
-                results[name]["num_voxels"].append((exp_dir["voxel_resolution"].mean()+2)**3)     
+                results[name]["num_voxels"].append((exp_dir["voxel_resolution"].mean()+2)**3)  
                 results[name]["cd_means"].append(exp_dir["cd"].mean())
                 try:
                     results[name]["num_sparse_voxels"].append(exp_dir["num_sparse_voxels"].mean())

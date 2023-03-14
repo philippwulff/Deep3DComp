@@ -110,7 +110,13 @@ if __name__ == "__main__":
     split_path = "examples/splits/sv2_planes_test.json"
 
     voxel_resolutions = [
-        128
+        102,
+        103,
+        105,
+        106,
+        107,
+        112,
+        118,
     ]
 
     # Setup args and logging.
@@ -120,9 +126,9 @@ if __name__ == "__main__":
     utils.configure_logging(args)
 
     for voxel_resolution in voxel_resolutions:  
-        output_dir += f"_res={args.voxel_resolution}"
-        os.makedirs(output_dir, exist_ok=True)  
-        logging.info(f"Voxelizing with resolution={voxel_resolution} into {output_dir}")
+        this_output_dir = output_dir + f"_res={voxel_resolution}"
+        os.makedirs(this_output_dir, exist_ok=True)  
+        logging.info(f"Voxelizing with resolution={voxel_resolution} into {this_output_dir}")
         meshes_targets_and_specific_args = get_meshes_targets_and_specific_args(split_path)
         shared_logs = []
         try:
@@ -138,7 +144,7 @@ if __name__ == "__main__":
         except KeyboardInterrupt:
             logging.info("Cleaning up and exiting.")
         finally:
-            df_output_path = os.path.join(output_dir, "run_voxelize_until_CD_logs.csv")
+            df_output_path = os.path.join(this_output_dir, "run_voxelize_until_CD_logs.csv")
             logs_df = pd.DataFrame(
                 shared_logs, 
                 columns=[
