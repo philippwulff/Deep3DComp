@@ -10,7 +10,7 @@ import trimesh
 
 import deep_sdf
 import deep_sdf.workspace as ws
-import pytorch3d
+# import pytorch3d
 
 
 def evaluate(experiment_directory, checkpoint, data_dir, split_filename, curvature_sampling=0.):
