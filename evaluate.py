@@ -79,12 +79,12 @@ def evaluate(experiment_directory, checkpoint, data_dir, split_filename, curvatu
                     (os.path.join(dataset, class_name, instance_name), chamfer_dist, normal_consistency)
                 )
 
-    with open(
-        os.path.join(
-            ws.get_evaluation_dir(experiment_directory, checkpoint, True), "chamfer.csv"
-        ),
-        "w",
-    ) as f:
+    output_filename = os.path.join(
+            ws.get_evaluation_dir(experiment_directory, checkpoint, True),
+            "chamfer"
+        )
+    output_filename += f".csv" if curvature_sampling == 0. else f"_{curvature_sampling:.3f}.csv"
+    with open(output_filename,"w",) as f:
         # semicolon-separated CSV file
         f.write("shape;chamfer_dist;all_chamfer_dist;normal_consistency\n")
         for result in chamfer_results:
@@ -138,10 +138,15 @@ if __name__ == "__main__":
 
     deep_sdf.configure_logging(args)
 
-    evaluate(
-        args.experiment_directory,
-        args.checkpoint,
-        args.data_source,
-        args.split_filename,
-        args.curvature_sampling
-    )
+    curvature_sampling = args.curvature_sampling
+    try:
+        curvature_sampling = float(curvature_sampling)
+        evaluate(
+            args.experiment_directory,
+            args.checkpoint,
+            args.data_source,
+            args.split_filename,
+            curvature_sampling
+        )
+    except ValueError:
+        logging.error(f"Could not cast {args.curvature_sampling} to float")
