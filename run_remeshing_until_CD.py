@@ -15,6 +15,7 @@ import pyvista
 from tqdm import tqdm
 from collections import deque
 import bpy
+import numpy as np
 
 import io
 from contextlib import redirect_stdout
@@ -34,6 +35,11 @@ def bpy_object_to_trimesh(bpy_obj):
 
 
 def run_remeshing_until_cd(input_obj_path: str, output_obj_path: str, target_chamfer_dist: float, logs: list):
+    mesh_name = input_obj_path.split("/")[-3].split(".")[0]
+    norm_params = np.load(os.path.join("/home/shared/deepsdfcomp/data/NormalizationParameters/ShapeNetV2/02691156", f"{mesh_name}.npz"))
+    offset = norm_params["offset"]
+    scale = norm_params["scale"][0]
+    
     # supress output of bpy
     with redirect_stdout(io.StringIO()):
         # delete all objects from scene
@@ -46,7 +52,11 @@ def run_remeshing_until_cd(input_obj_path: str, output_obj_path: str, target_cha
         elif ".ply" in input_obj_path:
             bpy.ops.import_mesh.ply(filepath=input_obj_path)
         obj = bpy.data.objects[0]
-
+        
+        # normalize
+        for v in obj.data.vertices:
+            v.co = [(c + offset[i]) * scale for i, c in enumerate(v.co)]
+        
         # remove doubles
         bpy.context.view_layer.objects.active = obj
         bpy.ops.object.editmode_toggle()
@@ -66,6 +76,8 @@ def run_remeshing_until_cd(input_obj_path: str, output_obj_path: str, target_cha
 
     gt_mesh = pyvista.read(input_obj_path)
     gt_trimesh = vtk_mesh_to_trimesh(gt_mesh)
+    for i, _ in enumerate(gt_trimesh.vertices):
+        gt_trimesh.vertices[i] = (gt_trimesh.vertices[i] + offset)*scale
     # gt_faces = gt_trimesh.faces.shape[0]
 
     # last_target_reduction = None
@@ -74,14 +86,14 @@ def run_remeshing_until_cd(input_obj_path: str, output_obj_path: str, target_cha
     # lr = 100
     # success = False
     prev_vert_count = 0
-    vert_count_not_chanted_counter = 0
+    vert_count_not_changed_counter = 0
     patience = 5
-    decimated_mesh = None
+    decimated_trimesh = None
     cd = 1000
     segment = [0.,1.]
     # Do not try for more than N retries.
     for i in range(100):
-        if vert_count_not_chanted_counter >= patience:
+        if vert_count_not_changed_counter >= patience:
             logging.debug("Achieved reduction to CD within target range")
             break
         # adjust modifier
@@ -92,17 +104,17 @@ def run_remeshing_until_cd(input_obj_path: str, output_obj_path: str, target_cha
         obj_applied_mods = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
         
         # convert to trimesh
-        decimated_mesh = bpy_object_to_trimesh(obj_applied_mods)
+        decimated_trimesh = bpy_object_to_trimesh(obj_applied_mods)
 
         # computing metric
-        cd, _ = metrics.compute_metric(gt_trimesh, decimated_mesh, metric="chamfer")
+        cd, _ = metrics.compute_metric(gt_trimesh, decimated_trimesh, metric="chamfer")
         
         # check if vertex count has changed
         vert_count = len(obj_applied_mods.data.vertices)
         if vert_count == prev_vert_count:
-            vert_count_not_chanted_counter += 1
+            vert_count_not_changed_counter += 1
         else:
-            vert_count_not_chanted_counter = 0
+            vert_count_not_changed_counter = 0
         prev_vert_count = vert_count
         logging.debug(f"CD: {cd:5f}, Target CD: {target_chamfer_dist:5f}, Decimation Ratio: {decimation_ratio:5f}, Vertices: {vert_count}")
 
@@ -117,9 +129,9 @@ def run_remeshing_until_cd(input_obj_path: str, output_obj_path: str, target_cha
         #     break
 
         # if not target_reduction >= 1.0:
-        #     decimated_mesh = gt_mesh.decimate(target_reduction)
-        #     decimated_trimesh = vtk_mesh_to_trimesh(decimated_mesh)
-        #     decimated_mesh.save(output_obj_path)
+        #     decimated_trimesh = gt_mesh.decimate(target_reduction)
+        #     decimated_trimesh = vtk_mesh_to_trimesh(decimated_trimesh)
+        #     decimated_trimesh.save(output_obj_path)
         #     last_num_faces.append(decimated_trimesh.faces.shape[0])
         #     cd, all_cd = metrics.compute_metric(gt_trimesh, decimated_trimesh, metric="chamfer")
 
@@ -153,9 +165,9 @@ def run_remeshing_until_cd(input_obj_path: str, output_obj_path: str, target_cha
         # target_reduction += target_reduction * (target_chamfer_dist - cd) * lr
     
     logging.info(f"Reduced by factor of {decimation_ratio:4f} to chamfer distance of {cd:4f}. Reduced Mesh has {len(obj_applied_mods.data.vertices)} Vertices.")
-    if decimated_mesh is not None and target_chamfer_dist_min < cd < target_chamfer_dist_max:
+    if decimated_trimesh is not None and target_chamfer_dist_min < cd < target_chamfer_dist_max:
         with open(output_obj_path, "wb+") as f:
-            f.write(trimesh.exchange.ply.export_ply(decimated_mesh))
+            f.write(trimesh.exchange.ply.export_ply(decimated_trimesh))
     # if not success:
     #     logging.info(f"No convergence after {i} iterations.")
     #     os.remove(output_obj_path)
@@ -164,7 +176,7 @@ def run_remeshing_until_cd(input_obj_path: str, output_obj_path: str, target_cha
 
 if __name__ == "__main__":
 
-    output_dir = "data/quadriflow_until_cd_meshes"      # This needs to be changed to where you want your data to be extracted to!
+    output_dir = "/home/shared/deepsdfcomp/decimation_runs/test"      # This needs to be changed to where you want your data to be extracted to!
     input_dir = "/mnt/hdd/ShapeNetCore.v2"
     split_path = "examples/splits/sv2_planes_test_filtered.json"
     quadriflow_executable = "../QuadriFlow/build/quadriflow"
