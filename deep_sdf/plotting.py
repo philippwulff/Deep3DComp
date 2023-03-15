@@ -414,7 +414,7 @@ def plot_manifold_tsne(exp, checkpoint=2000):
 
     # Create t-SNE.
     lat_vecs = ws.load_latent_vectors(exp, str(checkpoint))
-    lat_vecs_embedded = TSNE(n_components=2, perplexity=3).fit_transform(lat_vecs)
+    lat_vecs_embedded = TSNE(n_components=2, perplexity=1700).fit_transform(lat_vecs)
 
     # Load the shape information files.
     with open(os.path.join(exp, ws.specifications_filename), "r") as f:
@@ -439,6 +439,8 @@ def plot_manifold_tsne(exp, checkpoint=2000):
     # Plot points from all classes.
     ax_main = fig.add_subplot(gs[:2, :2])
     ax_main.scatter(lat_vecs_embedded[:, 0], lat_vecs_embedded[:, 1], s=5, c=colors)
+    ax_main.set_xlim(-1, 1)
+    ax_main.set_ylim(-1, 1)
     i = 0
     for r in range(nrows):
         for c in range(ncols):
@@ -452,6 +454,8 @@ def plot_manifold_tsne(exp, checkpoint=2000):
             color = cdict[wnlemma]
             ax.scatter(wnlemma_lat_vecs[:, 0], wnlemma_lat_vecs[:, 1], s=5, color=color)
             ax.set_title(wrap_text(wnlemma))
+            ax.set_xlim(-1, 1)
+            ax.set_ylim(-1, 1)
             i += 1
 
     # Legend and style the plot.

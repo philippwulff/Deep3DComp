@@ -31,4 +31,5 @@ dependencies:
     - point-cloud-utils
     - rtree
     - robust_laplacian
+    - pqdm
     # - ipykernel   # Might be needed if you run Jupyter Notebooks in VS Code

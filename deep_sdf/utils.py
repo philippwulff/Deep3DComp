@@ -135,7 +135,7 @@ def comp_fc_net_frac_params(num_params, codelength, div):
     return - (codelength+4)/(7*2) + math.sqrt(((codelength+4)/(7*2))**2 + (num_params/(div*7)))
 
 
-def scale_to_unit_sphere(mesh):
+def scale_to_unit_sphere(mesh, return_stats=False):
     """
     From: https://github.com/marian42/mesh_to_sdf/blob/master/mesh_to_sdf/utils.py
     """
@@ -145,7 +145,29 @@ def scale_to_unit_sphere(mesh):
     vertices = mesh.vertices - mesh.bounding_box.centroid
     distances = np.linalg.norm(vertices, axis=1)
     vertices /= np.max(distances)
+    if return_stats:
+        return trimesh.Trimesh(vertices=vertices, faces=mesh.faces), mesh.bounding_box.centroid, np.max(distances)
 
+    return trimesh.Trimesh(vertices=vertices, faces=mesh.faces)
+
+
+def scale_to_unit_cube(mesh, return_stats=False):
+    """
+    From: https://github.com/marian42/mesh_to_sdf/blob/master/mesh_to_sdf/utils.py
+    """
+    if isinstance(mesh, trimesh.Scene):
+        mesh = mesh.dump().sum()
+
+    vertices = mesh.vertices - mesh.bounding_box.centroid
+    vertices *= 2 / np.max(mesh.bounding_box.extents)
+    if return_stats:
+        return trimesh.Trimesh(vertices=vertices, faces=mesh.faces), mesh.bounding_box.centroid, 2 / np.max(mesh.bounding_box.extents)
+
+    return trimesh.Trimesh(vertices=vertices, faces=mesh.faces)
+
+
+def rescale_unit_mesh(mesh: trimesh.Trimesh, shift: np.ndarray, scale: np.ndarray):
+    vertices = mesh.vertices * scale + shift
     return trimesh.Trimesh(vertices=vertices, faces=mesh.faces)
 
 
