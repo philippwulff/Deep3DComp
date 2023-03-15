@@ -3,6 +3,7 @@
 
 import glob
 import logging
+import time
 import numpy as np
 import os
 import random
@@ -141,7 +142,7 @@ class SDFSamples(torch.utils.data.Dataset):
         )
 
         self.load_ram = load_ram
-
+        TIME = time.time()
         if load_ram:
             self.loaded_data = []
             for f in self.npyfiles:
@@ -155,18 +156,23 @@ class SDFSamples(torch.utils.data.Dataset):
                         neg_tensor[torch.randperm(neg_tensor.shape[0])],
                     ]
                 )
+        logging.debug(f"Time for loading into RAM: {(time.time() - TIME)*1000} ms"); TIME = time.time()
 
     def __len__(self):
         return len(self.npyfiles)
 
     def __getitem__(self, idx):
+        TIME = time.time()
         filename = os.path.join(
             self.data_source, ws.sdf_samples_subdir, self.npyfiles[idx]
         )
         if self.load_ram:
-            return (
+            retval = (
                 unpack_sdf_samples_from_ram(self.loaded_data[idx], self.subsample),
                 idx,
             )
         else:
-            return unpack_sdf_samples(filename, self.subsample), idx
+            retval = unpack_sdf_samples(filename, self.subsample), idx
+        
+        logging.debug(f"Time for getting item: {(time.time() - TIME)*1000} ms"); TIME = time.time()
+        return retval

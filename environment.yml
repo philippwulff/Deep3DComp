@@ -10,7 +10,7 @@ dependencies:
   - pytorch=1.13.0      # Later versions do not work with PyTorch3d.
   - torchvision 
   - torchaudio 
-  - pytorch-cuda=11.7   # NOTE: The version may differ on your system!
+  - pytorch-cuda=11.7   # NOTE: The version may differ on your system! Maybe change to: cudatoolkit=11.3
   - pytorch3d           # Linux-only! Maybe comment this out on Windows.
   - ipython
   - pip

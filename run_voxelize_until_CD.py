@@ -13,6 +13,8 @@ from tqdm import tqdm
 import mesh_to_sdf
 import skimage
 import random
+import copy
+import math
 
 
 def run_voxelize_until_cd(input_obj_path: str, output_obj_path: str, target_chamfer_dist: float, logs: list):
@@ -52,17 +54,28 @@ def run_voxelize_until_cd(input_obj_path: str, output_obj_path: str, target_cham
             bad_mesh_resolutions.append(voxel_resolution)
             continue
         # Reconstruct mesh from voxel grid.
-        verts, faces, normals, values = skimage.measure.marching_cubes(voxels, level=0.0, spacing=[voxel_size] * 3, method="lewiner")
+        verts, faces, normals, _ = skimage.measure.marching_cubes(voxels, level=0.0, spacing=[voxel_size] * 3, method="lewiner")
         reconstruction = trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals)
         reconstruction = utils.scale_to_unit_sphere(reconstruction)
         # Compute reconstruction quality.
         cd, _ = metrics.compute_metric(gt_mesh, reconstruction, metric="chamfer")
 
         vert_cnt = len(reconstruction.vertices)
+        num_dense_voxels = (voxel_resolution+2)**3
         logging.debug(f"CD: {cd:5f} (target={target_chamfer_dist:5f}) | Voxel-res={voxel_resolution} | Vertices={vert_cnt}")
 
         if target_chamfer_dist_min < cd < target_chamfer_dist_max:
             success = True
+            # Compute sparse voxel grid.
+            sparse_vox = copy.deepcopy(voxels)
+            # Drop all voxels further than two voxel diagonals.
+            sparse_vox[abs(sparse_vox)>2*math.sqrt(2*voxel_size**2)] = 1
+            verts, faces, normals, _ = skimage.measure.marching_cubes(sparse_vox, level=0.0, spacing=[voxel_size] * 3, method="lewiner")
+            sparse_reconstruction = trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals)
+            sparse_reconstruction = utils.scale_to_unit_sphere(sparse_reconstruction)
+            sparse_cd, _ = metrics.compute_metric(gt_mesh, sparse_reconstruction, metric="chamfer")
+            num_sparse_voxels = num_dense_voxels - len(sparse_vox[sparse_vox == 1.0])
+            # Save results to logs.
             logs.append([
                 input_obj_path, 
                 output_obj_path,
@@ -70,7 +83,10 @@ def run_voxelize_until_cd(input_obj_path: str, output_obj_path: str, target_cham
                 len(gt_mesh.vertices),
                 vert_cnt,
                 cd,
-                i
+                i,
+                sparse_cd,
+                num_sparse_voxels,
+                num_dense_voxels
             ])
             break
         # Perform bisection.
@@ -86,6 +102,7 @@ def run_voxelize_until_cd(input_obj_path: str, output_obj_path: str, target_cham
         logging.debug(f"Reduced with voxel-res {voxel_resolution} to chamfer distance of {cd:4f}. Reduced Mesh has {vert_cnt} Vertices.")
         with open(output_obj_path, "wb+") as f:
             f.write(trimesh.exchange.ply.export_ply(reconstruction))
+        
     else:
         logging.debug(f"No convergence after {i} iterations.")
     logging.debug(f"Took {time.time() - start_time:.01f} seconds.")
@@ -172,7 +189,18 @@ if __name__ == "__main__":
         df_output_path = os.path.join(output_dir, "run_voxelize_until_CD_logs.csv")
         logs_df = pd.DataFrame(
             shared_logs, 
-            columns=["input_obj_path", "output_obj_path", "voxel_resolution", "gt_vertices", "decimated_vertices", "cd", "iteration"],
+            columns=[
+                "input_obj_path", 
+                "output_obj_path", 
+                "voxel_resolution", 
+                "gt_vertices", 
+                "decimated_vertices", 
+                "cd", 
+                "iteration", 
+                "sparse_cd", 
+                "num_sparse_voxels", 
+                "num_dense_voxels"
+            ],
         )
         if os.path.exists(df_output_path):
             logs_df_old = pd.read_csv(df_output_path)

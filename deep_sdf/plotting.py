@@ -6,11 +6,20 @@ from typing import Union, List, Dict
 import os
 import deep_sdf.workspace as ws
 from deep_sdf import utils, metrics
+import sklearn
+from sklearn.manifold import TSNE
 import trimesh
 import math
 import pandas as pd
 import matplotlib.animation as animation
 from matplotlib.lines import Line2D
+from collections import defaultdict
+import matplotlib
+from matplotlib.patches import Patch
+from matplotlib.lines import Line2D
+from matplotlib.gridspec import GridSpec
+
+import json
 if not os.name == "nt":
     # We do not import this on Windows.
     import pyrender
@@ -292,9 +301,10 @@ def plot_sdf_cross_section(points: np.array, sdf: np.array, margin=0.05, plane_o
 
 
 def plot_capacity_vs_chamfer_dist(
-        exp_dirs: List, checkpoint: int = 2000, 
-        type: str = "network",
-        voxelization_logs: List[pd.DataFrame] = None
+        exp_dirs_net_capacity: List = None, 
+        exp_dirs_lat_capacity: List = None,
+        voxelization_logs: List[pd.DataFrame] = None,
+        checkpoint: int = 2000, 
     ) -> plt.figure:
     """
     Example usage: 
@@ -307,53 +317,153 @@ def plot_capacity_vs_chamfer_dist(
     plotting.plot_capacity_vs_chamfer_dist(exps, type=["latent"], voxelization_logs=vox_logs)
     ```
     """
-    fig, ax = plt.subplots(1, 1)
-    param_cnts = []
-    latent_sizes = []
-    cd_means = []
-    cd_medians = []
-    for exp_dir in exp_dirs:
-        # Read experiment specs.
-        specs = ws.load_experiment_specifications(exp_dir)
-        arch = __import__("networks." + specs["NetworkArch"], fromlist=["Decoder"])
-        latent_size = specs["CodeLength"]
-        decoder = arch.Decoder(latent_size, **specs["NetworkSpecs"])
-        latent_sizes.append(latent_size)
-        # Calculate model size.
-        param_size = 0
-        param_cnt = 0
-        for param in decoder.parameters():
-            param_size += param.nelement() * param.element_size()
-            param_cnt += param.nelement()
-        buffer_size = 0
-        for buffer in decoder.buffers():
-            buffer_size += buffer.nelement() * buffer.element_size()
-        model_size_mb = (param_size + buffer_size) / 1024**2
-        param_cnts.append(param_cnt)
-        # Read evaluation results.
-        eval_log_path = os.path.join(ws.get_evaluation_dir(exp_dir, str(checkpoint)), "chamfer.csv")
-        ws.get_model_params_dir(exp_dir)
-        eval_df = pd.read_csv(eval_log_path, delimiter=";")
-        cd_means.append(eval_df["chamfer_dist"].mean())
-        cd_medians.append(eval_df["chamfer_dist"].median())
+    exps = {
+        "net": [] if not exp_dirs_net_capacity else exp_dirs_net_capacity,
+        "lat": [] if not exp_dirs_lat_capacity else exp_dirs_lat_capacity,
+        "vox": [] if not voxelization_logs else [pd.read_csv(_) for _ in voxelization_logs],
+    }
+    assert any([exps["net"], exps["lat"], exps["vox"]]), "NO EXPERIMENT DIRS GIVEN"
+
+    # Combine all results from different experiments.
+    results = defaultdict(lambda: defaultdict(list))
+    for name, exp_dirs in exps.items():
+        for exp_dir in exp_dirs:
+            if name == "vox":
+                results[name]["voxel_resolutions"].append(exp_dir["voxel_resolution"].mean())
+                # +2 because we did not add the padding in the logged results
+                results[name]["num_voxels"].append((exp_dir["voxel_resolution"].mean()+2)**3)     
+                results[name]["cd_means"].append(exp_dir["cd"].mean())
+                try:
+                    results[name]["num_sparse_voxels"].append(exp_dir["num_sparse_voxels"].mean())
+                    results[name]["sparse_cd_means"].append(exp_dir["sparse_cd"].mean())
+                except KeyError:
+                    pass
+            else:
+                # Read experiment specs.
+                specs = ws.load_experiment_specifications(exp_dir)
+                arch = __import__("networks." + specs["NetworkArch"], fromlist=["Decoder"])
+                latent_size = specs["CodeLength"]
+                decoder = arch.Decoder(latent_size, **specs["NetworkSpecs"])
+                results[name]["latent_sizes"].append(latent_size)
+                # Calculate model size.
+                param_size = 0
+                param_cnt = 0
+                for param in decoder.parameters():
+                    param_size += param.nelement() * param.element_size()
+                    param_cnt += param.nelement()
+                buffer_size = 0
+                for buffer in decoder.buffers():
+                    buffer_size += buffer.nelement() * buffer.element_size()
+                model_size_mb = (param_size + buffer_size) / 1024**2
+                results[name]["param_cnts"].append(param_cnt)
+                # Read evaluation results.
+                eval_log_path = os.path.join(ws.get_evaluation_dir(exp_dir, str(checkpoint)), "chamfer.csv")
+                ws.get_model_params_dir(exp_dir)
+                eval_df = pd.read_csv(eval_log_path, delimiter=";")
+                results[name]["cd_means"].append(eval_df["chamfer_dist"].mean())
+                results[name]["cd_medians"].append(eval_df["chamfer_dist"].median())
 
     # Plot.
-    if type == "network":
-        ax.plot(param_cnts, cd_means, ls="-", label="SIREN mean CD")
-        ax.plot(param_cnts, cd_medians, ls="--", label="SIREN median CD")
-    elif type == "latent":
-        ax.plot(latent_sizes, cd_means, ls="-", label="SIREN mean CD")
-        ax.plot(latent_sizes, cd_medians, ls="--", label="SIREN median CD")
-        if voxelization_logs:
-            ax.scatter(
-                [_["decimated_vertices"].mean() * 3 for _ in voxelization_logs], 
-                [_["cd"].mean() for _ in voxelization_logs], 
-                ls="--", label="Voxelization mean CD"
-            )
+    fig, axes = plt.subplots(1, len([_ for _ in exps if exps[_]]))
+    for i, (name, result) in enumerate(results.items()):
+        ax = axes[i] if isinstance(axes, np.ndarray) else axes
+        if name in ["net", "lat"]:
+            ax.set_title(f"# of {name} params vs. Chamfer distance")
+            ax.set_ylabel("Chamfer distance")
+            ax.set_xlabel(f"# of {name} params")
+            x_values = result["param_cnts"] if name == "net" else result["latent_sizes"]
+            ax.plot(x_values, result["cd_means"], ls="-", label="SIREN mean CD")
+            ax.plot(x_values, result["cd_medians"], ls="--", label="SIREN median CD")
+        elif name == "vox":
+            ax.set_title(f"Voxel count vs. Reconstruction Chamfer distance")
+            ax.set_ylabel("Chamfer distance")
+            ax.set_xlabel(f"Voxels count")
+            num_voxels = np.array(result["num_voxels"])
+            cd_means = np.array(result["cd_means"])
+            idxs = num_voxels.argsort()
+            x, y = num_voxels[idxs], cd_means[idxs]
+            ax.scatter(x, y, marker="x", label="Dense Voxel Grid", color="red")
+            # numpy.polyfit(numpy.log(x), y, 1)
+            # plt.plot(np.unique(x), np.poly1d(np.polyfit(x, y, 1))(np.unique(x)), ls="-.", c="red")
 
-    ax.set_title(f"# of {type} params vs. Chamfer distance")
-    ax.set_ylabel("Chamfer distance")
-    ax.set_xlabel(f"# of {type} params")
-    ax.legend()
+            if "num_sparse_voxels" in result:
+                num_voxels = np.array(result["num_sparse_voxels"])
+                cd_means = np.array(result["sparse_cd_means"])
+                idxs = num_voxels.argsort()
+                x, y = num_voxels[idxs], cd_means[idxs]
+                ax.scatter(x, y, marker="x", label="Sparse Voxel Grid", color="orange")
+                ax.set_xscale('log')
+
+
+        ax.legend()
+
+    plt.close()
+    return fig
+
+
+def plot_manifold_tsne(exp, checkpoint=2000):
+    wordnet_relations_df = pd.read_csv("data/shapenet_wordnet_relations.csv")
+    cmap = matplotlib.cm.get_cmap("tab20")
+    num_colors = 20
+    nrows = 7
+    ncols = 4
+    default_color = "black"
+
+    def wrap_text(text, max_text_len = 25):
+        return "\n".join([text[y-max_text_len:y] for y in range(max_text_len, len(text)+max_text_len,max_text_len)])
+
+    # Create t-SNE.
+    lat_vecs = ws.load_latent_vectors(exp, str(checkpoint))
+    lat_vecs_embedded = TSNE(n_components=2, perplexity=3).fit_transform(lat_vecs)
+
+    # Load the shape information files.
+    with open(os.path.join(exp, ws.specifications_filename), "r") as f:
+        specs = json.load(f)
+        with open(specs["TrainSplit"], "r") as split_f:
+            split = json.load(split_f)
+    dataset_name = list(split.keys())[0]
+    synset_id, shape_ids = list(split[dataset_name].items())[0]
+    
+    # The word class belonging to each latent vector.
+    wnlemmas = wordnet_relations_df.set_index("fullId").loc[["3dw."+_ for _ in shape_ids], "wnlemmas"]
+    # Count the occurences of each class.
+    wnlemmas_cnts = wnlemmas.value_counts()
+    top_n_wnlemmas = wnlemmas_cnts[:num_colors].index
+    cdict = dict(zip(top_n_wnlemmas, cmap(np.linspace(0, 1, num_colors))))
+    colors = [cdict.get(_, default_color) for _ in wnlemmas]
+
+    # Plot.
+    gs = GridSpec(nrows, ncols, hspace=0.5)
+    fig = plt.figure(figsize=(ncols*3, nrows*3.5))
+
+    # Plot points from all classes.
+    ax_main = fig.add_subplot(gs[:2, :2])
+    ax_main.scatter(lat_vecs_embedded[:, 0], lat_vecs_embedded[:, 1], s=5, c=colors)
+    i = 0
+    for r in range(nrows):
+        for c in range(ncols):
+            # if r < 1 or (r < 2 and c < 2):
+            if r < 2 or i >= len(top_n_wnlemmas):
+                continue
+            ax = fig.add_subplot(gs[r, c])
+            wnlemma = top_n_wnlemmas[i]
+            wnlemma_lat_vecs_indxs = [_ for _ in range(len(lat_vecs)) if wnlemmas.iloc[_] == wnlemma]
+            wnlemma_lat_vecs = lat_vecs_embedded[wnlemma_lat_vecs_indxs, :]
+            color = cdict[wnlemma]
+            ax.scatter(wnlemma_lat_vecs[:, 0], wnlemma_lat_vecs[:, 1], s=5, color=color)
+            ax.set_title(wrap_text(wnlemma))
+            i += 1
+
+    # Legend and style the plot.
+    name_cnts = wnlemmas_cnts[:num_colors]
+    other_cnts = len(wnlemmas) - sum(name_cnts)
+    legend_elements = [
+        *[Line2D([0], [0], marker='o', color='w', label=wrap_text(f"{name} ({name_cnts[i]})", 70), markerfacecolor=color, markersize=10) for i, (name, color) in enumerate(cdict.items())],
+        Line2D([0], [0], marker='o', color='w', label=f"Others ({other_cnts})", markerfacecolor=default_color, markersize=10)
+    ]
+    ax_main.legend(handles=legend_elements, bbox_to_anchor=(1.04, 1), loc="upper left", borderaxespad=0, prop={'size': 9})
+    ax_main.set_title("t-SNE plot of latent space")
+
+    # fig.tight_layout()
     plt.close()
     return fig
