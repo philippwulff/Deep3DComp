@@ -161,7 +161,7 @@ def scale_to_unit_cube(mesh, return_stats=False):
     vertices = mesh.vertices - mesh.bounding_box.centroid
     vertices *= 2 / np.max(mesh.bounding_box.extents)
     if return_stats:
-        return trimesh.Trimesh(vertices=vertices, faces=mesh.faces), mesh.bounding_box.centroid, 2 / np.max(mesh.bounding_box.extents)
+        return trimesh.Trimesh(vertices=vertices, faces=mesh.faces), mesh.bounding_box.centroid, np.max(mesh.bounding_box.extents) / 2
 
     return trimesh.Trimesh(vertices=vertices, faces=mesh.faces)
 
