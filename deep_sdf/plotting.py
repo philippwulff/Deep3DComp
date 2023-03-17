@@ -372,8 +372,12 @@ def plot_capacity_vs_chamfer_dist(
             ax.set_ylabel("Chamfer distance")
             ax.set_xlabel(f"# of {name} params")
             x_values = result["param_cnts"] if name == "net" else result["latent_sizes"]
-            ax.plot(x_values, result["cd_means"], ls="-", label="SIREN mean CD")
-            ax.plot(x_values, result["cd_medians"], ls="--", label="SIREN median CD")
+            idxs = np.array(x_values).argsort()
+            x = np.array(x_values)[idxs]
+            y1 = np.array(result["cd_means"])[idxs]
+            y2 = np.array(result["cd_medians"])[idxs]
+            ax.plot(x, y1, ls="-", label="SIREN mean CD")
+            ax.plot(x, y2, ls="--", label="SIREN median CD")
         elif name == "vox":
             ax.set_title(f"Voxel count vs. Reconstruction Chamfer distance")
             ax.set_ylabel("Chamfer distance")

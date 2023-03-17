@@ -78,7 +78,7 @@ def run_voxelize(mtsa: dict):
         return
     # Reconstruct mesh from voxel grid.
     verts, faces, normals, _ = skimage.measure.marching_cubes(voxels, level=0.0, spacing=[voxel_size] * 3, method="lewiner")
-    reconstruction_unit = trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals)
+    reconstruction_unit = utils.scale_to_unit_cube(trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals))
     # Rescale.
     reconstruction = utils.rescale_unit_mesh(reconstruction_unit, gt_centroid, gt_scale)
     # Compute reconstruction quality.
@@ -92,7 +92,7 @@ def run_voxelize(mtsa: dict):
     # Drop all voxels further than two voxel diagonals.
     sparse_vox[abs(sparse_vox)>2*math.sqrt(2*voxel_size**2)] = 1
     verts, faces, normals, _ = skimage.measure.marching_cubes(sparse_vox, level=0.0, spacing=[voxel_size] * 3, method="lewiner")
-    sparse_reconstruction_unit = trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals)
+    sparse_reconstruction_unit = utils.scale_to_unit_cube(trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals))
     sparse_reconstruction = utils.rescale_unit_mesh(sparse_reconstruction_unit, gt_centroid, gt_scale)
     sparse_cd, _ = metrics.compute_metric(gt_mesh, sparse_reconstruction, metric="chamfer")
     num_sparse_voxels = num_dense_voxels - len(sparse_vox[sparse_vox == 1.0])
