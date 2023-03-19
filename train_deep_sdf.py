@@ -277,6 +277,8 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         logging.error(f"Running w/o validation, since the specified ShapeNet path does not exist: {shapenet_path}")
         shapenet_path = None
     load_ram = get_spec_with_default(specs, "LoadDatasetIntoRAM", False)
+    if load_ram:
+        logging.info(f"Loading SDF samples into memory because LoadDatasetIntoRAM=true")
     sdf_dataset = deep_sdf.data.SDFSamples(
         data_source, train_split, num_samp_per_scene, load_ram=load_ram
     )

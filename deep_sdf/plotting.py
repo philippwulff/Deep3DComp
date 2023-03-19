@@ -331,7 +331,7 @@ def plot_capacity_vs_chamfer_dist(
             if name == "vox":
                 results[name]["voxel_resolutions"].append(exp_dir["voxel_resolution"].mean())
                 # +2 because we did not add the padding in the logged results
-                results[name]["num_voxels"].append((exp_dir["voxel_resolution"].mean()+2)**3)     
+                results[name]["num_voxels"].append((exp_dir["voxel_resolution"].mean()+2)**3)  
                 results[name]["cd_means"].append(exp_dir["cd"].mean())
                 try:
                     results[name]["num_sparse_voxels"].append(exp_dir["num_sparse_voxels"].mean())
@@ -372,8 +372,12 @@ def plot_capacity_vs_chamfer_dist(
             ax.set_ylabel("Chamfer distance")
             ax.set_xlabel(f"# of {name} params")
             x_values = result["param_cnts"] if name == "net" else result["latent_sizes"]
-            ax.plot(x_values, result["cd_means"], ls="-", label="SIREN mean CD")
-            ax.plot(x_values, result["cd_medians"], ls="--", label="SIREN median CD")
+            idxs = np.array(x_values).argsort()
+            x = np.array(x_values)[idxs]
+            y1 = np.array(result["cd_means"])[idxs]
+            y2 = np.array(result["cd_medians"])[idxs]
+            ax.plot(x, y1, ls="-", label="SIREN mean CD")
+            ax.plot(x, y2, ls="--", label="SIREN median CD")
         elif name == "vox":
             ax.set_title(f"Voxel count vs. Reconstruction Chamfer distance")
             ax.set_ylabel("Chamfer distance")
@@ -414,7 +418,7 @@ def plot_manifold_tsne(exp, checkpoint=2000):
 
     # Create t-SNE.
     lat_vecs = ws.load_latent_vectors(exp, str(checkpoint))
-    lat_vecs_embedded = TSNE(n_components=2, perplexity=3).fit_transform(lat_vecs)
+    lat_vecs_embedded = TSNE(n_components=2, perplexity=1700).fit_transform(lat_vecs)
 
     # Load the shape information files.
     with open(os.path.join(exp, ws.specifications_filename), "r") as f:
@@ -439,6 +443,8 @@ def plot_manifold_tsne(exp, checkpoint=2000):
     # Plot points from all classes.
     ax_main = fig.add_subplot(gs[:2, :2])
     ax_main.scatter(lat_vecs_embedded[:, 0], lat_vecs_embedded[:, 1], s=5, c=colors)
+    ax_main.set_xlim(-1, 1)
+    ax_main.set_ylim(-1, 1)
     i = 0
     for r in range(nrows):
         for c in range(ncols):
@@ -452,6 +458,8 @@ def plot_manifold_tsne(exp, checkpoint=2000):
             color = cdict[wnlemma]
             ax.scatter(wnlemma_lat_vecs[:, 0], wnlemma_lat_vecs[:, 1], s=5, color=color)
             ax.set_title(wrap_text(wnlemma))
+            ax.set_xlim(-1, 1)
+            ax.set_ylim(-1, 1)
             i += 1
 
     # Legend and style the plot.

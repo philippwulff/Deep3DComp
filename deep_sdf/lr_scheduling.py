@@ -20,14 +20,6 @@ class StepLearningRateSchedule(LearningRateSchedule):
     def get_learning_rate(self, epoch, *args, **kwargs):
 
         return self.initial * (self.factor ** (epoch // self.interval))
-
-
-class CyclicStepLearningRateSchedule(StepLearningRateSchedule):
-    def __init__(self, initial, interval, factor, max_lr_factor=1.5):
-        super().__init__(initial, interval, factor)
-
-    def get_learning_rate(self, epoch, *args, **kwargs):
-        lr = super().get_learning_rate(epoch, *args, **kwargs)
         
 
 class StepLearningRateOnPlateauSchedule(LearningRateSchedule):
