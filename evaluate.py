@@ -30,6 +30,8 @@ def evaluate(experiment_directory, checkpoint, data_dir, split_filename, curvatu
                 reconstructed_mesh_filename = ws.get_reconstructed_mesh_filename(
                     experiment_directory, checkpoint, dataset, class_name, instance_name
                 )
+                if "train" in split_filename:
+                    reconstructed_mesh_filename = reconstructed_mesh_filename.replace("2000", "2000_train")
 
                 logging.debug(
                     'reconstructed mesh is "' + reconstructed_mesh_filename + '"'
@@ -83,7 +85,10 @@ def evaluate(experiment_directory, checkpoint, data_dir, split_filename, curvatu
             ws.get_evaluation_dir(experiment_directory, checkpoint, True),
             "chamfer"
         )
+    output_filename += "_train" if "train" in split_filename else ""
     output_filename += f".csv" if curvature_sampling == 0. else f"_{curvature_sampling:.3f}.csv"
+    logging.info(split_filename)
+    logging.info(output_filename)
     with open(output_filename,"w",) as f:
         # semicolon-separated CSV file
         f.write("shape;chamfer_dist;all_chamfer_dist;normal_consistency\n")
@@ -127,7 +132,7 @@ if __name__ == "__main__":
         "--curvature_sampling",
         "-cs",
         dest="curvature_sampling",
-        default=0.,
+        default=0.0,
         required=False,
         help="Amount of sampling wrt mesh curvature. 0 means smapling wrt. face area, 1 wrt. face curvature.",
     )
@@ -148,5 +153,5 @@ if __name__ == "__main__":
             args.split_filename,
             curvature_sampling
         )
-    except ValueError:
-        logging.error(f"Could not cast {args.curvature_sampling} to float")
+    except ValueError as ve:
+        logging.error(f"Could not cast {args.curvature_sampling} to float" + str(ve.args))

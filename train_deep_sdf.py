@@ -256,6 +256,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
     do_code_regularization = get_spec_with_default(specs, "CodeRegularization", True)
     code_reg_lambda = get_spec_with_default(specs, "CodeRegularizationLambda", 1e-4)
+    use_eikonal = get_spec_with_default(specs, "UseEikonal", False)
 
     code_bound = get_spec_with_default(specs, "CodeBound", None)
 
@@ -432,6 +433,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                 sdf_data.requires_grad = False
 
                 xyz = sdf_data[:, 0:3]
+                xyz.requires_grad = True
                 sdf_gt = sdf_data[:, 3].unsqueeze(1)
 
                 if enforce_minmax:
@@ -468,6 +470,14 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                         ) / num_sdf_samples
 
                         chunk_loss = chunk_loss + reg_loss.cuda()
+                    
+                    summary_writer.add_scalar("Loss/train_vanilla", chunk_loss, global_step=epoch)
+                    if use_eikonal:
+                        grad_outputs = torch.ones_like(pred_sdf, requires_grad=True)
+                        gradients = torch.autograd.grad(pred_sdf, [xyz[i]], grad_outputs=grad_outputs, create_graph=True, allow_unused=True, retain_graph=True)[0]
+                        eikonal_loss = 0.002 * ((1. - torch.linalg.vector_norm(gradients, dim=1))**2).mean()
+                        chunk_loss += eikonal_loss
+                        summary_writer.add_scalar("Loss/train_eikonal", eikonal_loss, global_step=epoch)
 
                     chunk_loss.backward()
 

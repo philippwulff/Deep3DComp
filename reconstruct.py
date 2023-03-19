@@ -197,8 +197,11 @@ if __name__ == "__main__":
     save_latvec_only = False
     rerun = 0
 
+    dirname = str(saved_model_epoch)
+    if "train" in args.split_filename:
+        dirname += "_train"
     reconstruction_dir = os.path.join(
-        args.experiment_directory, ws.reconstructions_subdir, str(saved_model_epoch)
+        args.experiment_directory, ws.reconstructions_subdir, dirname
     )
 
     if not os.path.isdir(reconstruction_dir):
