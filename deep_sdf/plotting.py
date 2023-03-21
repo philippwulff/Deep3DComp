@@ -362,15 +362,16 @@ def plot_capacity_vs_chamfer_dist(
                 results[name]["param_cnts"].append(param_cnt)
                 # Read evaluation results.
                 eval_log_path = os.path.join(ws.get_evaluation_dir(exp_dir, str(checkpoint)), "chamfer.csv")
-                eval_log_train_path = os.path.join(ws.get_evaluation_dir(exp_dir, str(checkpoint)), "chamfer_train.csv")
                 ws.get_model_params_dir(exp_dir)
                 eval_df = pd.read_csv(eval_log_path, delimiter=";")
                 results[name]["cd_means"].append(eval_df["chamfer_dist"].mean())
                 results[name]["cd_medians"].append(eval_df["chamfer_dist"].median())
                 print(f"Extracting num_params={param_cnt} width={dims[0]} depth={len(dims)}: CD_mean={eval_df['chamfer_dist'].mean():.6f} CD_median={eval_df['chamfer_dist'].median():.6f} num_shapes={len(eval_df['chamfer_dist'])}")
                 
-                if os.exists(eval_log_train_path):
+                eval_log_train_path = os.path.join(ws.get_evaluation_dir(exp_dir, str(checkpoint)), "chamfer_on_train_set.csv")
+                if os.path.exists(eval_log_train_path):
                     eval_train_df = pd.read_csv(eval_log_train_path, delimiter=";")
+                    results[name]["param_cnts_train"].append(param_cnt)
                     results[name]["cd_means_train"].append(eval_train_df["chamfer_dist"].mean())
                     results[name]["cd_medians_train"].append(eval_train_df["chamfer_dist"].median())
                     print(f"Eval on train set: CD_mean={eval_train_df['chamfer_dist'].mean():.6f} CD_median={eval_train_df['chamfer_dist'].median():.6f} num_shapes={len(eval_train_df['chamfer_dist'])}")
@@ -390,6 +391,15 @@ def plot_capacity_vs_chamfer_dist(
             y2 = np.array(result["cd_medians"])[idxs]
             ax.plot(x, y1, ls="-", label="SIREN mean CD")
             ax.plot(x, y2, ls="--", label="SIREN median CD")
+            if "cd_means_train" in result:
+                x_values = result["param_cnts_train"]# if name == "net" else result["latent_sizes"]
+                idxs = np.array(x_values).argsort()
+                x = np.array(x_values)[idxs]
+                y1 = np.array(result["cd_means_train"])[idxs]
+                y2 = np.array(result["cd_medians_train"])[idxs]
+                ax.plot(x, y1, ls="-", label="SIREN mean CD (train)")
+                ax.plot(x, y2, ls="--", label="SIREN median CD (train)")
+            
         elif name == "vox":
             ax.set_title(f"Voxel count vs. Reconstruction Chamfer distance")
             ax.set_ylabel("Chamfer distance")
