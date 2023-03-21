@@ -32,4 +32,4 @@ dependencies:
     - rtree
     - robust_laplacian
     - pqdm
-    # - ipykernel   # Might be needed if you run Jupyter Notebooks in VS Code
+    # - ipykernel   # Might be needed if you run Jupyter Notebooks in VSCode
