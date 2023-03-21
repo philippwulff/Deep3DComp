@@ -18,6 +18,9 @@ def evaluate(experiment_directory, checkpoint, data_dir, split_filename, curvatu
 
     with open(split_filename, "r") as f:
         split = json.load(f)
+        
+    if "train" in split_filename:
+        checkpoint = str(checkpoint) + "on_train_set"
 
     chamfer_results = []
 
@@ -27,7 +30,6 @@ def evaluate(experiment_directory, checkpoint, data_dir, split_filename, curvatu
                 logging.debug(
                     "evaluating " + os.path.join(dataset, class_name, instance_name)
                 )
-
                 reconstructed_mesh_filename = ws.get_reconstructed_mesh_filename(
                     experiment_directory, checkpoint, dataset, class_name, instance_name
                 )
