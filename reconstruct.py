@@ -198,8 +198,6 @@ if __name__ == "__main__":
     rerun = 0
 
     dirname = str(saved_model_epoch)
-    if "train" in args.split_filename:
-        dirname += "_train"
     reconstruction_dir = os.path.join(
         args.experiment_directory, ws.reconstructions_subdir, dirname
     )
