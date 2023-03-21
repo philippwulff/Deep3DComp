@@ -417,6 +417,8 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
             epoch_time_start = time.time()
             epoch_losses = []
+            epoch_sdf_losses = []
+            epoch_reg_losses = []
 
             logging.info("epoch {}...".format(epoch))
 
@@ -447,7 +449,9 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
                 sdf_gt = torch.chunk(sdf_gt, batch_split)
 
-                batch_loss = 0.0
+                batch_loss_tb = 0.0
+                sdf_loss_tb = 0.0
+                reg_loss_tb = 0.0
 
                 optimizer_all.zero_grad()
 
@@ -462,22 +466,26 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                     if enforce_minmax:
                         pred_sdf = torch.clamp(pred_sdf, minT, maxT)
                     chunk_loss = loss_l1(pred_sdf, sdf_gt[i].cuda()) / num_sdf_samples
+                    sdf_loss_tb += chunk_loss.item()
 
                     if do_code_regularization:
                         l2_size_loss = torch.sum(torch.norm(batch_vecs, dim=1))
                         reg_loss = (
                             code_reg_lambda * min(1, epoch / 100) * l2_size_loss
                         ) / num_sdf_samples
-
+                    
                         chunk_loss = chunk_loss + reg_loss.cuda()
+                        reg_loss_tb += reg_loss.item()
 
                     chunk_loss.backward()
 
-                    batch_loss += chunk_loss.item()
+                    batch_loss_tb += chunk_loss.item()
                                     
-                logging.debug("loss = {}".format(batch_loss))
-                loss_log.append(batch_loss)
-                epoch_losses.append(batch_loss)
+                logging.debug("loss = {}".format(batch_loss_tb))
+                loss_log.append(batch_loss_tb)
+                epoch_losses.append(batch_loss_tb)
+                epoch_sdf_losses.append(sdf_loss_tb)
+                epoch_reg_losses.append(reg_loss_tb)
 
                 if grad_clip is not None:
 
@@ -492,6 +500,8 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             epoch_loss = sum(epoch_losses)/len(epoch_losses)
             loss_log_epoch.append(epoch_loss)
             summary_writer.add_scalar("Loss/train", epoch_loss, global_step=epoch)
+            summary_writer.add_scalar("Loss/train_sdf", sum(epoch_sdf_losses)/len(epoch_sdf_losses), global_step=epoch)
+            summary_writer.add_scalar("Loss/train_reg", sum(epoch_reg_losses)/len(epoch_reg_losses), global_step=epoch)
             # Log learning rate.
             lr_log.append([schedule.get_learning_rate(epoch) for schedule in lr_schedules])
             summary_writer.add_scalar("Learning Rate/Params", lr_log[-1][0], global_step=epoch)

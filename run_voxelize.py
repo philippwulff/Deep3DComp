@@ -122,6 +122,8 @@ if __name__ == "__main__":
     split_path = "examples/splits/sv2_planes_test.json"
 
     voxel_resolutions = [
+        32,
+        48, 
         64, 
         80,
         96, 
@@ -164,6 +166,7 @@ if __name__ == "__main__":
             stopping_early = True
         finally:
             df_output_path = os.path.join(this_output_dir, "run_voxelize_logs.csv")
+            print([_ for _ in logs if _])
             logs_df = pd.DataFrame(
                 [_ for _ in logs if _], 
                 columns=[

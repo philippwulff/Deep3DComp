@@ -6,6 +6,8 @@ data/*
 *.obj
 *.pyl
 **/3d_metrics
+.DS_store
+.idea
 
 # Log files, reconstructions
 **/LatentCodes

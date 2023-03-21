@@ -333,6 +333,7 @@ def plot_capacity_vs_chamfer_dist(
                 # +2 because we did not add the padding in the logged results
                 results[name]["num_voxels"].append((exp_dir["voxel_resolution"].mean()+2)**3)  
                 results[name]["cd_means"].append(exp_dir["cd"].mean())
+                print(f"Extracting vox_res={exp_dir['voxel_resolution'].mean():.1f}: CD={exp_dir['cd'].mean():.5f} num_shapes={len(exp_dir['voxel_resolution'])}")
                 try:
                     results[name]["num_sparse_voxels"].append(exp_dir["num_sparse_voxels"].mean())
                     results[name]["sparse_cd_means"].append(exp_dir["sparse_cd"].mean())
@@ -341,10 +342,13 @@ def plot_capacity_vs_chamfer_dist(
             else:
                 # Read experiment specs.
                 specs = ws.load_experiment_specifications(exp_dir)
+                dims = specs["NetworkSpecs"]["dims"]
                 arch = __import__("networks." + specs["NetworkArch"], fromlist=["Decoder"])
                 latent_size = specs["CodeLength"]
                 decoder = arch.Decoder(latent_size, **specs["NetworkSpecs"])
                 results[name]["latent_sizes"].append(latent_size)
+                results[name]["widths"].append(dims[0])
+                results[name]["depths"].append(len(dims))
                 # Calculate model size.
                 param_size = 0
                 param_cnt = 0
@@ -358,10 +362,18 @@ def plot_capacity_vs_chamfer_dist(
                 results[name]["param_cnts"].append(param_cnt)
                 # Read evaluation results.
                 eval_log_path = os.path.join(ws.get_evaluation_dir(exp_dir, str(checkpoint)), "chamfer.csv")
+                eval_log_train_path = os.path.join(ws.get_evaluation_dir(exp_dir, str(checkpoint)), "chamfer_train.csv")
                 ws.get_model_params_dir(exp_dir)
                 eval_df = pd.read_csv(eval_log_path, delimiter=";")
                 results[name]["cd_means"].append(eval_df["chamfer_dist"].mean())
                 results[name]["cd_medians"].append(eval_df["chamfer_dist"].median())
+                print(f"Extracting num_params={param_cnt} width={dims[0]} depth={len(dims)}: CD_mean={eval_df['chamfer_dist'].mean():.6f} CD_median={eval_df['chamfer_dist'].median():.6f} num_shapes={len(eval_df['chamfer_dist'])}")
+                
+                if os.exists(eval_log_train_path):
+                    eval_train_df = pd.read_csv(eval_log_train_path, delimiter=";")
+                    results[name]["cd_means_train"].append(eval_train_df["chamfer_dist"].mean())
+                    results[name]["cd_medians_train"].append(eval_train_df["chamfer_dist"].median())
+                    print(f"Eval on train set: CD_mean={eval_train_df['chamfer_dist'].mean():.6f} CD_median={eval_train_df['chamfer_dist'].median():.6f} num_shapes={len(eval_train_df['chamfer_dist'])}")
 
     # Plot.
     fig, axes = plt.subplots(1, len([_ for _ in exps if exps[_]]))
