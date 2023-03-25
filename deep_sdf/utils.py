@@ -151,7 +151,7 @@ def scale_to_unit_sphere(mesh, return_stats=False):
     return trimesh.Trimesh(vertices=vertices, faces=mesh.faces)
 
 
-def scale_to_unit_cube(mesh, return_stats=False):
+def scale_to_unit_cube(mesh, return_stats=False, extent=1.0):
     """
     From: https://github.com/marian42/mesh_to_sdf/blob/master/mesh_to_sdf/utils.py
     """
@@ -159,9 +159,9 @@ def scale_to_unit_cube(mesh, return_stats=False):
         mesh = mesh.dump().sum()
 
     vertices = mesh.vertices - mesh.bounding_box.centroid
-    vertices *= 2 / np.max(mesh.bounding_box.extents)
+    vertices *= 2 / np.max(mesh.bounding_box.extents) * extent
     if return_stats:
-        return trimesh.Trimesh(vertices=vertices, faces=mesh.faces), mesh.bounding_box.centroid, np.max(mesh.bounding_box.extents) / 2
+        return trimesh.Trimesh(vertices=vertices, faces=mesh.faces), mesh.bounding_box.centroid, np.max(mesh.bounding_box.extents)*extent / 2
 
     return trimesh.Trimesh(vertices=vertices, faces=mesh.faces)
 

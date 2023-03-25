@@ -11,6 +11,8 @@ from typing import Optional
 import trimesh
 import os
 import subprocess
+import math
+from trimesh import creation, transformations
 
 from deep_sdf import utils
 
@@ -104,9 +106,6 @@ def convert_sdf_samples_to_ply(
 
     numpy_3d_sdf_tensor = pytorch_3d_sdf_tensor.numpy()
 
-    # verts, faces, normals, values = skimage.measure.marching_cubes_lewiner(
-    #     numpy_3d_sdf_tensor, level=0.0, spacing=[voxel_size] * 3
-    # )
     try:
         verts, faces, normals, values = skimage.measure.marching_cubes(
             numpy_3d_sdf_tensor, level=0.0, spacing=[voxel_size] * 3, method="lewiner"
@@ -157,18 +156,39 @@ def convert_sdf_samples_to_ply(
     return True
 
 
-def sdf_voxels_from_shapeid(shape_id:str,
-                            voxel_size,
-                            padding:float=1.,
-                            shapenet_path:str="/mnt/hdd/ShapeNetCore.v2",
-                            class_id:str="02691156",
-                            sdf_gen_path:str="/home/freissmuth/sdf-gen/build/bin"):
+def get_SDFGen_voxels(
+    shape_id: str,
+    voxel_resolution: int,
+    padding: float = 3,
+    shapenet_path: str = "/mnt/hdd/ShapeNetCore.v2",
+    class_id: str = "02691156",
+    sdf_gen_path: str = "/home/freissmuth/sdf-gen/build/bin"
+):
+    voxel_size = 2.0 / (voxel_resolution - 2 * padding)
     in_path = os.path.join(shapenet_path, class_id, shape_id, "models/model_normalized.obj")
     out_path = os.path.join(shapenet_path, class_id, shape_id, "models/normalized")
-    cmd = f'{sdf_gen_path}/sdf_gen_shapenet {in_path} {out_path} {voxel_size} ' + str(padding)
-    subprocess.call(cmd, shell=True)
+    unit_path = out_path + "_unit.obj"
+    
+    in_mesh = utils.as_mesh(trimesh.load(in_path))    
+    in_mesh_unit, centroid, scale = utils.scale_to_unit_cube(in_mesh, return_stats=True)
+    in_mesh_unit.export(unit_path, file_type='obj')
+    
+    cmd = f'{sdf_gen_path}/sdf_gen_shapenet {unit_path} {out_path} {str(voxel_size)} ' + str(padding)
+    subprocess.call(cmd, shell=True, stdout=subprocess.DEVNULL)#stdout=subprocess.STDOUT if debug else subprocess.DEVNULL)
+    
     voxels = np.load(str(out_path)+".npy")
+    # Needed because SDFGen rotates the mesh.
+    voxels = np.swapaxes(voxels, 0, 2)
+    
     os.remove(out_path + "_if.npy")
     os.remove(out_path + ".npy")
-    os.remove(os.path.join(shapenet_path, class_id, shape_id, "models/model_normalized.vti"))
-    return {"voxel_size":voxel_size, "padding":padding, "voxels":voxels}
+    os.remove(unit_path)
+    os.remove(os.path.join(shapenet_path, class_id, shape_id, "models/normalized_unit.vti"))
+    return {"voxel_size": voxel_size, "padding": padding, "voxels": voxels, "centroid": centroid, "scale": scale}
+
+def get_mesh_from_SDFGen_voxels(voxels, voxel_size, centroid, scale):
+    verts, faces, normals, _ = skimage.measure.marching_cubes(voxels, level=voxel_size/2, method="lewiner")
+    recon = trimesh.Trimesh(verts, faces, vertex_normals=normals)
+    recon = utils.scale_to_unit_cube(recon)
+    recon = utils.rescale_unit_mesh(recon, shift=centroid, scale=scale)
+    return recon, voxel_size/2
