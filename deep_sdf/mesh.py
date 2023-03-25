@@ -170,5 +170,5 @@ def sdf_voxels_from_shapeid(shape_id:str,
     voxels = np.load(str(out_path)+".npy")
     os.remove(out_path + "_if.npy")
     os.remove(out_path + ".npy")
-    os.remove(in_path = os.path.join(shapenet_path, class_id, shape_id, "models/model_normalized.vti"))
+    os.remove(os.path.join(shapenet_path, class_id, shape_id, "models/model_normalized.vti"))
     return {"voxel_size":voxel_size, "padding":padding, "voxels":voxels}
