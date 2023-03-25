@@ -565,6 +565,15 @@ class HandlerDashedLines(HandlerLineCollection):
         return leglines
 
 def plot_manifold_tsne(exp, checkpoint=2000):
+    """Get the wordnet relations file from:
+    Open the taxonomy viewer on ShapeNet's website -> Navigate to the plane class -> Click on `MetaData`
+    Args:
+        exp (_type_): _description_
+        checkpoint (int, optional): _description_. Defaults to 2000.
+
+    Returns:
+        _type_: _description_
+    """
     wordnet_relations_df = pd.read_csv("data/shapenet_wordnet_relations.csv")
     cmap = matplotlib.cm.get_cmap("tab20")
     num_colors = 20
