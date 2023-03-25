@@ -158,14 +158,14 @@ def convert_sdf_samples_to_ply(
 
 
 def sdf_voxels_from_shapeid(shape_id:str,
-                            voxel_size,
+                            voxel_size:float,
                             padding:float=1.,
                             shapenet_path:str="/mnt/hdd/ShapeNetCore.v2",
                             class_id:str="02691156",
                             sdf_gen_path:str="/home/freissmuth/sdf-gen/build/bin"):
     in_path = os.path.join(shapenet_path, class_id, shape_id, "models/model_normalized.obj")
     out_path = os.path.join(shapenet_path, class_id, shape_id, "models/normalized")
-    cmd = f'{sdf_gen_path}/sdf_gen_shapenet {in_path} {out_path} {voxel_size} ' + str(padding)
+    cmd = f'{sdf_gen_path}/sdf_gen_shapenet {in_path} {out_path} {str(voxel_size)} ' + str(padding)
     subprocess.call(cmd, shell=True)
     voxels = np.load(str(out_path)+".npy")
     os.remove(out_path + "_if.npy")
