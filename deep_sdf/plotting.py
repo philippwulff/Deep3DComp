@@ -13,11 +13,13 @@ import math
 import pandas as pd
 import matplotlib.animation as animation
 from matplotlib.lines import Line2D
+from matplotlib.legend_handler import HandlerLineCollection, HandlerTuple
 from collections import defaultdict
 import matplotlib
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 from matplotlib.gridspec import GridSpec
+import matplotlib.collections as mcol
 
 import json
 if not os.name == "nt":
@@ -302,24 +304,20 @@ def plot_sdf_cross_section(points: np.array, sdf: np.array, margin=0.05, plane_o
 
 def plot_capacity_vs_chamfer_dist(
         exp_dirs_net_capacity: List = None, 
+        exp_dirs_net_relu_capacity: List = None,
         exp_dirs_lat_capacity: List = None,
         voxelization_logs: List[pd.DataFrame] = None,
         checkpoint: int = 2000, 
         plot_aspect_ratios: bool = False,
+        plot_means: bool = False,
     ) -> plt.figure:
     """
     Example usage: 
-    ```
-    exps = [
-        "../../shared/deepsdfcomp/searches/double_nonlinearity/siren_width=64_no_bottleneck",
-        "../../shared/deepsdfcomp/searches/double_nonlinearity/siren_width=256_no_bottleneck_v2",
-    ]
-    vox_logs = [pd.read_csv("data/voxelize_until_cd_meshes_CD=0.001/run_voxelize_until_CD_logs.csv")]
-    plotting.plot_capacity_vs_chamfer_dist(exps, type=["latent"], voxelization_logs=vox_logs)
-    ```
+
     """
     exps = {
         "net": [] if not exp_dirs_net_capacity else exp_dirs_net_capacity,
+        "net_relu": [] if not exp_dirs_net_relu_capacity else exp_dirs_net_relu_capacity,
         "lat": [] if not exp_dirs_lat_capacity else exp_dirs_lat_capacity,
         "vox": [] if not voxelization_logs else [pd.read_csv(_) for _ in voxelization_logs],
     }
@@ -331,6 +329,7 @@ def plot_capacity_vs_chamfer_dist(
     results = defaultdict(lambda: defaultdict(list))
     results_per_aspect = defaultdict(lambda: defaultdict(list))
     for name, exp_dirs in exps.items():
+        print(f"\n<=== Reading {name} exps ===>")
         for exp_dir in exp_dirs:
             if name == "vox":
                 results[name]["voxel_resolutions"].append(exp_dir["voxel_resolution"].mean())
@@ -373,53 +372,94 @@ def plot_capacity_vs_chamfer_dist(
                 cd_median = eval_df["chamfer_dist"].median()
                 results[name]["cd_means"].append(cd_mean)
                 results[name]["cd_medians"].append(cd_median)
-                results_per_aspect[aspect_ratio]["param_cnts"].append(param_cnt)
-                results_per_aspect[aspect_ratio]["cd_means"].append(cd_mean)
-                results_per_aspect[aspect_ratio]["cd_medians"].append(cd_median)
+                if name == "net":
+                    results_per_aspect[aspect_ratio]["param_cnts"].append(param_cnt)
+                    results_per_aspect[aspect_ratio]["cd_means"].append(cd_mean)
+                    results_per_aspect[aspect_ratio]["cd_medians"].append(cd_median)
                 
-                print(f"Extracting num_params={param_cnt} width={dims[0]} depth={len(dims)}: CD_mean={cd_mean:.6f} CD_median={cd_median:.6f} num_shapes={len(eval_df['chamfer_dist'])}")
+                print(f"Extracting num_params={param_cnt} width={dims[0]} depth={len(dims)} latent={latent_size}: CD_mean={cd_mean:.6f} CD_median={cd_median:.6f} num_shapes={len(eval_df['chamfer_dist'])}")
                 
                 eval_log_train_path = os.path.join(ws.get_evaluation_dir(exp_dir, str(checkpoint)), "chamfer_on_train_set.csv")
                 if os.path.exists(eval_log_train_path):
                     eval_train_df = pd.read_csv(eval_log_train_path, delimiter=";")
                     cd_mean = eval_train_df["chamfer_dist"].mean()
                     cd_median = eval_train_df["chamfer_dist"].median()
+                    print(f"    -> Eval on train set: CD_mean={cd_mean:.6f} CD_median={cd_median:.6f} num_shapes={len(eval_train_df['chamfer_dist'])}")
                     results[name]["param_cnts_train"].append(param_cnt)
                     results[name]["cd_means_train"].append(cd_mean)
                     results[name]["cd_medians_train"].append(cd_median)
-                    results_per_aspect[aspect_ratio]["param_cnts_train"].append(param_cnt)
-                    results_per_aspect[aspect_ratio]["cd_means_train"].append(cd_mean)
-                    results_per_aspect[aspect_ratio]["cd_medians_train"].append(cd_median)
-                    print(f"Eval on train set: CD_mean={cd_mean:.6f} CD_median={cd_median:.6f} num_shapes={len(eval_train_df['chamfer_dist'])}")
+                    if name == "net":    
+                        results_per_aspect[aspect_ratio]["param_cnts_train"].append(param_cnt)
+                        results_per_aspect[aspect_ratio]["cd_means_train"].append(cd_mean)
+                        results_per_aspect[aspect_ratio]["cd_medians_train"].append(cd_median)
+                        
     if plot_aspect_ratios:
         results["per_aspect"] = results_per_aspect
     # Plot.
-    fig, axes = plt.subplots(1, len(results), figsize=(len(results)*8, 5))
+    columns = int("net" in results or "net_relu" in results) + int("vox" in results or "lat" in results) + int("per_aspect" in results)
+    fig, axes = plt.subplots(1, columns, figsize=(columns*7, 5), sharey=True, dpi=200)
+    axes_dict = {
+        "net": axes[0] if isinstance(axes, np.ndarray) else axes,
+        "net_relu": axes[0] if isinstance(axes, np.ndarray) else axes,
+        "lat": axes[1] if isinstance(axes, np.ndarray) and len(axes)>1 else axes,
+        "vox": axes[1] if isinstance(axes, np.ndarray) and len(axes)>1 else axes,
+        "per_aspect": axes[-1] if isinstance(axes, np.ndarray) else axes,
+    }
+    display_labels_colors_linestyle = {
+        "net": ["SIREN (test)", "red", "-"],
+        "net_train": ["SIREN (train)", "red", "--"],
+        "net_relu": ["ReLU MLP (test)", "blue", "-"],
+        "net_relu_train": ["ReLU MLP (train)", "blue", "--"],
+        "lat": ["Latent Code", "green", "-"],
+        "vox": ["Voxel", "orange", "-"],
+        "per_aspect": ["Per Aspect", "-1", "-"],
+        "per_aspect_train": ["Per Aspect", "-1", "--"],
+    }
+    
+    def plot(ax, name, x, y1, y2, c=None, ls=None):
+        label = display_labels_colors_linestyle[name][0] if name in display_labels_colors_linestyle else name
+        c = c if c is not None else display_labels_colors_linestyle[name][1]
+        ls = ls if ls is not None else display_labels_colors_linestyle[name][2]
+        if plot_means:
+            ax.plot(x, y1, ls=":", c=c)
+        ax.plot(x, y2, ls=ls, c=c, label=label)
+
     for i, (name, result) in enumerate(results.items()):
-        ax = axes[i] if isinstance(axes, np.ndarray) else axes
-        if name in ["net", "lat"]:
-            ax.set_title(f"# of {name} params vs. Chamfer distance")
-            ax.set_ylabel("Chamfer distance")
-            ax.set_xlabel(f"# of {name} params")
-            x_values = result["param_cnts"] if name == "net" else result["latent_sizes"]
+        ax = axes_dict[name]
+        if name in ["net", "net_relu"]:
+            ax.set_title(f"No. of Network Parameters vs. Reconstruction Quality")
+            ax.set_xlabel(f"No. of Network Parameters")
+            x_values = result["param_cnts"]
             idxs = np.array(x_values).argsort()
-            x = np.array(x_values)[idxs]
-            y1 = np.array(result["cd_means"])[idxs]
-            y2 = np.array(result["cd_medians"])[idxs]
-            ax.plot(x, y1, ls="-", c="blue", label="SIREN (test)")
-            ax.plot(x, y2, ls="--", c="blue")
+            plot(
+                ax, name,
+                np.array(x_values)[idxs],
+                np.array(result["cd_means"])[idxs],
+                np.array(result["cd_medians"])[idxs],
+            )
             if "cd_means_train" in result:
                 x_values = result["param_cnts_train"]# if name == "net" else result["latent_sizes"]
                 idxs = np.array(x_values).argsort()
-                x = np.array(x_values)[idxs]
-                y1 = np.array(result["cd_means_train"])[idxs]
-                y2 = np.array(result["cd_medians_train"])[idxs]
-                ax.plot(x, y1, ls="-", c="red", label="SIREN (train)")
-                ax.plot(x, y2, ls="--", c="red")
+                plot(
+                    ax, name+"_train",
+                    np.array(x_values)[idxs],
+                    np.array(result["cd_means_train"])[idxs],
+                    np.array(result["cd_medians_train"])[idxs],
+                )
+        elif name == "lat":
+            ax.set_title(f"Representation Size vs. Reconstruction Quality")
+            ax.set_xlabel(f"No. of Voxels or Latent Code Length")
+            x_values = result["latent_sizes"]
+            idxs = np.array(x_values).argsort()
+            plot(
+                ax, name,
+                np.array(x_values)[idxs],
+                np.array(result["cd_means"])[idxs],
+                np.array(result["cd_medians"])[idxs],
+            )
         elif name == "vox":
-            ax.set_title(f"Voxel count vs. Reconstruction Chamfer distance")
-            ax.set_ylabel("Chamfer distance")
-            ax.set_xlabel(f"Voxels count")
+            ax.set_title(f"Representation Size vs. Reconstruction Quality")
+            ax.set_xlabel(f"No. of Voxels or Latent Code Length")
             num_voxels = np.array(result["num_voxels"])
             cd_means = np.array(result["cd_means"])
             idxs = num_voxels.argsort()
@@ -436,40 +476,93 @@ def plot_capacity_vs_chamfer_dist(
                 ax.scatter(x, y, marker="x", label="Sparse Voxel Grid", color="orange")
                 ax.set_xscale('log')
         elif name == "per_aspect":
-            colors = cmap(np.linspace(0, 1, len(result)*2 if "cd_means_train" in list(result.values())[0] else len(result)))
+            colors = cmap(np.linspace(0, 1, len(result)*2 if result and "cd_means_train" in list(result.values())[0] else len(result)))
             for j, (aspect_ratio, res) in enumerate(result.items()):
-                c = colors[j*2]
-                ax.set_title(f"# of net params vs. Chamfer distance per aspect ratio")
-                ax.set_ylabel("Chamfer distance")
-                ax.set_xlabel(f"# of net params")
+                j *= 2 if "cd_means_train" in res else 1
+                ax.set_title(f"Per Aspect Ratio: No. of Network Parameters vs. Reconstruction Quality")
+                ax.set_xlabel(f"No. of Network Parameters")
                 x_values = res["param_cnts"]
                 idxs = np.array(x_values).argsort()
-                x = np.array(x_values)[idxs]
-                y1 = np.array(res["cd_means"])[idxs]
-                y2 = np.array(res["cd_medians"])[idxs]
-                ax.plot(x, y1, ls="-", c=c, label=f"{aspect_ratio} (test)")
-                ax.plot(x, y2, ls="--", c=c)
+                plot(
+                    ax, f"{aspect_ratio} (test)",
+                    np.array(x_values)[idxs],
+                    np.array(res["cd_means"])[idxs],
+                    np.array(res["cd_medians"])[idxs],
+                    c = colors[j],
+                    ls = "-",
+                )
                 if "cd_means_train" in res:
-                    c = colors[j*2+1]
+                    c = colors[j+1]
                     x_values = res["param_cnts_train"]
                     idxs = np.array(x_values).argsort()
-                    x = np.array(x_values)[idxs]
-                    y1 = np.array(res["cd_means_train"])[idxs]
-                    y2 = np.array(res["cd_medians_train"])[idxs]
-                    ax.plot(x, y1, ls="-", c=c, label=f"{aspect_ratio} (train)")
-                    ax.plot(x, y2, ls="--", c=c)
+                    plot(
+                        ax, f"{aspect_ratio} (train)",
+                        np.array(x_values)[idxs],
+                        np.array(res["cd_means_train"])[idxs],
+                        np.array(res["cd_medians_train"])[idxs],
+                        c = colors[j],
+                        ls = "--",
+                    )
 
         handles, labels = ax.get_legend_handles_labels()
-        custom_handles = [
-            Line2D([0], [0], label="Mean", ls="-", color="gray"),
-            Line2D([0], [0], label="Median", ls="--", color="gray")
-        ]
-        handles.extend(custom_handles) 
-        ax.legend(handles=handles)
-
+        lc = mcol.LineCollection(2*[[(0,0)]], linestyles=["-", "--"], colors=["gray", "gray"])
+        handles.append(lc)
+        labels.append("Median")
+            #Line2D([0], [0], label="Median", ls="-", color="gray")]
+        if plot_means:
+            handles.append(Line2D([0], [0], ls=":", color="gray"))
+            labels.append("Mean")
+        if i == 0:
+            ax.set_ylabel("Chamfer distance")
+        ax.legend(handles=handles, labels=labels, handler_map={type(lc): HandlerDashedLines()}, handleheight=1.2)
+        ax.set_yscale('log')
+        ax.grid(axis="y", which="both", linestyle=":")
+    
+    fig.tight_layout()
     plt.close()
     return fig
 
+class HandlerDashedLines(HandlerLineCollection):
+    """
+    Custom Handler for LineCollection instances.
+    From: https://matplotlib.org/stable/gallery/text_labels_and_annotations/legend_demo.html
+    """
+    def create_artists(self, legend, orig_handle,
+                       xdescent, ydescent, width, height, fontsize, trans):
+        # figure out how many lines there are
+        numlines = len(orig_handle.get_segments())
+        xdata, xdata_marker = self.get_xdata(legend, xdescent, ydescent,
+                                             width, height, fontsize)
+        leglines = []
+        # divide the vertical space where the lines will go
+        # into equal parts based on the number of lines
+        ydata = np.full_like(xdata, height / (numlines + 1))
+        # for each line, create the line at the proper location
+        # and set the dash pattern
+        for i in range(numlines):
+            legline = Line2D(xdata, ydata * (numlines - i) - ydescent)
+            self.update_prop(legline, orig_handle, legend)
+            # set color, dash pattern, and linewidth to that
+            # of the lines in linecollection
+            try:
+                color = orig_handle.get_colors()[i]
+            except IndexError:
+                color = orig_handle.get_colors()[0]
+            try:
+                dashes = orig_handle.get_dashes()[i]
+            except IndexError:
+                dashes = orig_handle.get_dashes()[0]
+            try:
+                lw = orig_handle.get_linewidths()[i]
+            except IndexError:
+                lw = orig_handle.get_linewidths()[0]
+            if dashes[1] is not None:
+                legline.set_dashes(dashes[1])
+            legline.set_color(color)
+            legline.set_transform(trans)
+            legline.set_linewidth(lw)
+            leglines.append(legline)
+        return leglines
 
 def plot_manifold_tsne(exp, checkpoint=2000):
     wordnet_relations_df = pd.read_csv("data/shapenet_wordnet_relations.csv")

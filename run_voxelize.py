@@ -72,12 +72,17 @@ def run_voxelize(mtsa: dict):
 
     # Extract voxel grid.
     try:
-        voxels = mesh_to_sdf.mesh_to_voxels(gt_mesh_unit, voxel_resolution=voxel_resolution, check_result=True, pad=True, sign_method="depth")
+        voxels = mesh_to_sdf.mesh_to_voxels(gt_mesh_unit, voxel_resolution=voxel_resolution, check_result=True, pad=True, sign_method=SIGN_METHOD)
     except mesh_to_sdf.BadMeshException:
         logging.debug(f"Caught BadMeshException at voxel-res {voxel_resolution} ({input_obj_path})")
         return
     # Reconstruct mesh from voxel grid.
-    verts, faces, normals, _ = skimage.measure.marching_cubes(voxels, level=0.0, spacing=[voxel_size] * 3, method="lewiner")
+    try:
+        verts, faces, normals, _ = skimage.measure.marching_cubes(voxels, level=0.0, spacing=[voxel_size] * 3, method="lewiner")
+    except ValueError:
+        # ValueError('Surface level must be within volume data range.')
+        logging.debug(f"Caught ValueError at voxel-res {voxel_resolution} ({input_obj_path})")
+        return
     reconstruction_unit = utils.scale_to_unit_cube(trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals))
     # Rescale.
     reconstruction = utils.rescale_unit_mesh(reconstruction_unit, gt_centroid, gt_scale)
@@ -91,7 +96,12 @@ def run_voxelize(mtsa: dict):
     sparse_vox = copy.deepcopy(voxels)
     # Drop all voxels further than two voxel diagonals.
     sparse_vox[abs(sparse_vox)>2*math.sqrt(2*voxel_size**2)] = 1
-    verts, faces, normals, _ = skimage.measure.marching_cubes(sparse_vox, level=0.0, spacing=[voxel_size] * 3, method="lewiner")
+    try:
+        verts, faces, normals, _ = skimage.measure.marching_cubes(sparse_vox, level=0.0, spacing=[voxel_size] * 3, method="lewiner")
+    except ValueError:
+        # ValueError('Surface level must be within volume data range.')
+        logging.debug(f"Caught ValueError at voxel-res {voxel_resolution} ({input_obj_path})")
+        return
     sparse_reconstruction_unit = utils.scale_to_unit_cube(trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals))
     sparse_reconstruction = utils.rescale_unit_mesh(sparse_reconstruction_unit, gt_centroid, gt_scale)
     sparse_cd, _ = metrics.compute_metric(gt_mesh, sparse_reconstruction, metric="chamfer")
@@ -116,12 +126,15 @@ def run_voxelize(mtsa: dict):
         
 if __name__ == "__main__":
 
-    output_dir = "data/voxRes/voxelize_meshes"      # This needs to be changed to where you want your data to be extracted to!
-    input_dir = "/mnt/hdd/ShapeNetCore.v2"
+    output_dir = "data/voxResGT/voxelize_meshes"      # This needs to be changed to where you want your data to be extracted to!
     input_dir = "../../shared/deepsdfcomp/data/manifold_meshes"
+    input_dir = "/mnt/hdd/ShapeNetCore.v2"
     split_path = "examples/splits/sv2_planes_test.json"
+    SIGN_METHOD = "normal"      # "normal" or "depth"
 
     voxel_resolutions = [
+        16,
+        24,
         32,
         48, 
         64, 
@@ -166,7 +179,6 @@ if __name__ == "__main__":
             stopping_early = True
         finally:
             df_output_path = os.path.join(this_output_dir, "run_voxelize_logs.csv")
-            print([_ for _ in logs if _])
             logs_df = pd.DataFrame(
                 [_ for _ in logs if _], 
                 columns=[
