@@ -17,9 +17,11 @@ import skimage
 import random
 import copy
 import math
+from pqdm.processes import pqdm
 
 
-def get_meshes_targets_and_specific_args(split_path: str):
+
+def get_meshes_targets_and_specific_args(split_path: str, output_dir: str, voxel_resolution: int):
     # Prepare all input and output mesh files.
     with open(split_path, "r") as f:
         split = json.load(f)
@@ -43,6 +45,7 @@ def get_meshes_targets_and_specific_args(split_path: str):
         meshes_targets_and_specific_args.append({
             "input_obj_path": existing_paths[0],
             "output_obj_path": os.path.join(output_dir, synset_id, shape_id + ".ply"),
+            "voxel_resolution": voxel_resolution,
         })
         os.makedirs(os.path.join(output_dir, synset_id), exist_ok=True)
 
@@ -53,23 +56,31 @@ def get_meshes_targets_and_specific_args(split_path: str):
     return meshes_targets_and_specific_args
 
 
-def run_voxelize(input_obj_path: str, output_obj_path: str, voxel_resolution: int, logs: list):
+def run_voxelize(mtsa: dict):
 
-    gt_mesh = utils.scale_to_unit_sphere(trimesh.load(input_obj_path))
+    input_obj_path = mtsa["input_obj_path"]
+    output_obj_path = mtsa["output_obj_path"]
+    voxel_resolution = mtsa["voxel_resolution"]
+    if os.path.exists(output_obj_path):
+        return
+
+    gt_mesh = utils.as_mesh(trimesh.load(input_obj_path))
+    gt_mesh_unit, gt_centroid, gt_scale = utils.scale_to_unit_cube(gt_mesh, return_stats=True)
     logging.debug(f"Voxelizing mesh: {input_obj_path}")
 
     voxel_size = 2.0 / (voxel_resolution - 1)
 
     # Extract voxel grid.
     try:
-        voxels = mesh_to_sdf.mesh_to_voxels(gt_mesh, voxel_resolution=voxel_resolution, check_result=True, pad=True, sign_method="depth")
+        voxels = mesh_to_sdf.mesh_to_voxels(gt_mesh_unit, voxel_resolution=voxel_resolution, check_result=True, pad=True, sign_method="depth")
     except mesh_to_sdf.BadMeshException:
         logging.debug(f"Caught BadMeshException at voxel-res {voxel_resolution} ({input_obj_path})")
         return
     # Reconstruct mesh from voxel grid.
     verts, faces, normals, _ = skimage.measure.marching_cubes(voxels, level=0.0, spacing=[voxel_size] * 3, method="lewiner")
-    reconstruction = trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals)
-    reconstruction = utils.scale_to_unit_sphere(reconstruction)
+    reconstruction_unit = utils.scale_to_unit_cube(trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals))
+    # Rescale.
+    reconstruction = utils.rescale_unit_mesh(reconstruction_unit, gt_centroid, gt_scale)
     # Compute reconstruction quality.
     cd, _ = metrics.compute_metric(gt_mesh, reconstruction, metric="chamfer")
 
@@ -81,12 +92,17 @@ def run_voxelize(input_obj_path: str, output_obj_path: str, voxel_resolution: in
     # Drop all voxels further than two voxel diagonals.
     sparse_vox[abs(sparse_vox)>2*math.sqrt(2*voxel_size**2)] = 1
     verts, faces, normals, _ = skimage.measure.marching_cubes(sparse_vox, level=0.0, spacing=[voxel_size] * 3, method="lewiner")
-    sparse_reconstruction = trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals)
-    sparse_reconstruction = utils.scale_to_unit_sphere(sparse_reconstruction)
+    sparse_reconstruction_unit = utils.scale_to_unit_cube(trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals))
+    sparse_reconstruction = utils.rescale_unit_mesh(sparse_reconstruction_unit, gt_centroid, gt_scale)
     sparse_cd, _ = metrics.compute_metric(gt_mesh, sparse_reconstruction, metric="chamfer")
     num_sparse_voxels = num_dense_voxels - len(sparse_vox[sparse_vox == 1.0])
+
+    logging.debug(f"Reduced with voxel-res {voxel_resolution} to chamfer distance of {cd:4f}. Reduced Mesh has {vert_cnt} Vertices.")
+    with open(output_obj_path, "wb+") as f:
+        f.write(trimesh.exchange.ply.export_ply(reconstruction))
+
     # Save results to logs.
-    logs.append([
+    return [
         input_obj_path, 
         output_obj_path,
         voxel_resolution, 
@@ -96,11 +112,7 @@ def run_voxelize(input_obj_path: str, output_obj_path: str, voxel_resolution: in
         sparse_cd,
         num_sparse_voxels,
         num_dense_voxels
-    ])
-
-    logging.debug(f"Reduced with voxel-res {voxel_resolution} to chamfer distance of {cd:4f}. Reduced Mesh has {vert_cnt} Vertices.")
-    with open(output_obj_path, "wb+") as f:
-        f.write(trimesh.exchange.ply.export_ply(reconstruction))
+    ]
         
 if __name__ == "__main__":
 
@@ -110,37 +122,53 @@ if __name__ == "__main__":
     split_path = "examples/splits/sv2_planes_test.json"
 
     voxel_resolutions = [
-        128
+        32,
+        48, 
+        64, 
+        80,
+        96, 
+        112,
+        128, 
+        144,
+        160, 
+        176,
+        192, 
+        208,
+        224,
+        256,
+        288,
+        320
     ]
 
     # Setup args and logging.
     arg_parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
+    arg_parser.add_argument(
+        "--n_jobs",
+        dest="n_jobs",
+        default=1,
+        help="Number of processes to run in parallel.",
+    )
     utils.add_common_args(arg_parser)
     args = arg_parser.parse_args()
     utils.configure_logging(args)
 
     for voxel_resolution in voxel_resolutions:  
-        output_dir += f"_res={args.voxel_resolution}"
-        os.makedirs(output_dir, exist_ok=True)  
-        logging.info(f"Voxelizing with resolution={voxel_resolution} into {output_dir}")
-        meshes_targets_and_specific_args = get_meshes_targets_and_specific_args(split_path)
-        shared_logs = []
+        this_output_dir = output_dir + f"_res={voxel_resolution}"
+        os.makedirs(this_output_dir, exist_ok=True)  
+        logging.info(f"Voxelizing with resolution={voxel_resolution} into {this_output_dir}")
+        meshes_targets_and_specific_args = get_meshes_targets_and_specific_args(split_path, this_output_dir, voxel_resolution)
+        logs = []
+        stopping_early = False
         try:
-            for mtsa in tqdm(meshes_targets_and_specific_args):
-                if os.path.exists(mtsa["output_obj_path"]):
-                    continue
-                run_voxelize(
-                    mtsa["input_obj_path"],
-                    mtsa["output_obj_path"],
-                    voxel_resolution,
-                    shared_logs,
-                )
+            logs = pqdm(meshes_targets_and_specific_args, run_voxelize, n_jobs=int(args.n_jobs))
         except KeyboardInterrupt:
-            logging.info("Cleaning up and exiting.")
+            logging.info("Cleaning up and exiting. This might take a few minutes.")
+            stopping_early = True
         finally:
-            df_output_path = os.path.join(output_dir, "run_voxelize_until_CD_logs.csv")
+            df_output_path = os.path.join(this_output_dir, "run_voxelize_logs.csv")
+            print([_ for _ in logs if _])
             logs_df = pd.DataFrame(
-                shared_logs, 
+                [_ for _ in logs if _], 
                 columns=[
                     "input_obj_path", 
                     "output_obj_path", 
@@ -159,3 +187,5 @@ if __name__ == "__main__":
                 logs_df_all.to_csv(df_output_path)
             else:
                 logs_df.to_csv(df_output_path, index=False)
+            if stopping_early:
+                break

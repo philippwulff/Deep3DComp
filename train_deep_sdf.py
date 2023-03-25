@@ -256,6 +256,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
     do_code_regularization = get_spec_with_default(specs, "CodeRegularization", True)
     code_reg_lambda = get_spec_with_default(specs, "CodeRegularizationLambda", 1e-4)
+    use_eikonal = get_spec_with_default(specs, "UseEikonal", False)
 
     code_bound = get_spec_with_default(specs, "CodeBound", None)
 
@@ -276,6 +277,8 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
         logging.error(f"Running w/o validation, since the specified ShapeNet path does not exist: {shapenet_path}")
         shapenet_path = None
     load_ram = get_spec_with_default(specs, "LoadDatasetIntoRAM", False)
+    if load_ram:
+        logging.info(f"Loading SDF samples into memory because LoadDatasetIntoRAM=true")
     sdf_dataset = deep_sdf.data.SDFSamples(
         data_source, train_split, num_samp_per_scene, load_ram=load_ram
     )
@@ -415,6 +418,9 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
             epoch_time_start = time.time()
             epoch_losses = []
+            epoch_sdf_losses = []
+            epoch_reg_losses = []
+            epoch_eikonal_losses = []
 
             logging.info("epoch {}...".format(epoch))
 
@@ -432,6 +438,7 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                 sdf_data.requires_grad = False
 
                 xyz = sdf_data[:, 0:3]
+                xyz.requires_grad = True
                 sdf_gt = sdf_data[:, 3].unsqueeze(1)
 
                 if enforce_minmax:
@@ -445,7 +452,10 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
 
                 sdf_gt = torch.chunk(sdf_gt, batch_split)
 
-                batch_loss = 0.0
+                batch_loss_tb = 0.0
+                sdf_loss_tb = 0.0
+                reg_loss_tb = 0.0
+                eikonal_loss_tb = 0.0
 
                 optimizer_all.zero_grad()
 
@@ -460,22 +470,35 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
                     if enforce_minmax:
                         pred_sdf = torch.clamp(pred_sdf, minT, maxT)
                     chunk_loss = loss_l1(pred_sdf, sdf_gt[i].cuda()) / num_sdf_samples
+                    sdf_loss_tb += chunk_loss.item()
 
                     if do_code_regularization:
                         l2_size_loss = torch.sum(torch.norm(batch_vecs, dim=1))
                         reg_loss = (
                             code_reg_lambda * min(1, epoch / 100) * l2_size_loss
                         ) / num_sdf_samples
-
+                    
                         chunk_loss = chunk_loss + reg_loss.cuda()
+                        reg_loss_tb += reg_loss.item()
+                    
+                    summary_writer.add_scalar("Loss/train_vanilla", chunk_loss, global_step=epoch)
+                    if use_eikonal:
+                        grad_outputs = torch.ones_like(pred_sdf, requires_grad=True)
+                        gradients = torch.autograd.grad(pred_sdf, [xyz[i]], grad_outputs=grad_outputs, create_graph=True, allow_unused=True, retain_graph=True)[0]
+                        eikonal_loss = 0.002 * ((1. - torch.linalg.vector_norm(gradients, dim=1))**2).mean()
+                        chunk_loss += eikonal_loss
+                        eikonal_loss_tb += eikonal_loss.item()
 
                     chunk_loss.backward()
 
-                    batch_loss += chunk_loss.item()
+                    batch_loss_tb += chunk_loss.item()
                                     
-                logging.debug("loss = {}".format(batch_loss))
-                loss_log.append(batch_loss)
-                epoch_losses.append(batch_loss)
+                logging.debug("loss = {}".format(batch_loss_tb))
+                loss_log.append(batch_loss_tb)
+                epoch_losses.append(batch_loss_tb)
+                epoch_sdf_losses.append(sdf_loss_tb)
+                epoch_reg_losses.append(reg_loss_tb)
+                epoch_eikonal_losses.append(eikonal_loss_tb)
 
                 if grad_clip is not None:
 
@@ -486,10 +509,14 @@ def main_function(experiment_directory: str, continue_from, batch_split: int):
             # LOG EPOCH
             seconds_elapsed = time.time() - epoch_time_start
             timing_log.append(seconds_elapsed)
-            # Log epoch loss.
+            # Log epoch losses.
             epoch_loss = sum(epoch_losses)/len(epoch_losses)
             loss_log_epoch.append(epoch_loss)
             summary_writer.add_scalar("Loss/train", epoch_loss, global_step=epoch)
+            summary_writer.add_scalar("Loss/train_sdf", sum(epoch_sdf_losses)/len(epoch_sdf_losses), global_step=epoch)
+            summary_writer.add_scalar("Loss/train_reg", sum(epoch_reg_losses)/len(epoch_reg_losses), global_step=epoch)
+            if use_eikonal:
+                summary_writer.add_scalar("Loss/train_eikonal", sum(epoch_eikonal_losses)/len(epoch_eikonal_losses), global_step=epoch)
             # Log learning rate.
             lr_log.append([schedule.get_learning_rate(epoch) for schedule in lr_schedules])
             summary_writer.add_scalar("Learning Rate/Params", lr_log[-1][0], global_step=epoch)

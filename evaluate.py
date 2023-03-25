@@ -10,13 +10,15 @@ import trimesh
 
 import deep_sdf
 import deep_sdf.workspace as ws
-import pytorch3d
-
+if not os.name == "nt":
+    # We do not import this on Windows.
+    import pytorch3d
 
 def evaluate(experiment_directory, checkpoint, data_dir, split_filename, curvature_sampling=0.):
 
     with open(split_filename, "r") as f:
         split = json.load(f)
+        
 
     chamfer_results = []
 
@@ -26,9 +28,9 @@ def evaluate(experiment_directory, checkpoint, data_dir, split_filename, curvatu
                 logging.debug(
                     "evaluating " + os.path.join(dataset, class_name, instance_name)
                 )
-
+                checkpoint_ = f"{checkpoint}_on_train_set" if "train" in split_filename else checkpoint
                 reconstructed_mesh_filename = ws.get_reconstructed_mesh_filename(
-                    experiment_directory, checkpoint, dataset, class_name, instance_name
+                    experiment_directory, checkpoint_, dataset, class_name, instance_name
                 )
 
                 logging.debug(
@@ -64,31 +66,35 @@ def evaluate(experiment_directory, checkpoint, data_dir, split_filename, curvatu
 
                 normalization_params = np.load(normalization_params_filename)
 
-                chamfer_dist = deep_sdf.metrics.chamfer.compute_trimesh_chamfer(
+                chamfer_dist, all_dists = deep_sdf.metrics.chamfer.compute_trimesh_chamfer(
                     ground_truth_points,
                     reconstruction,
                     normalization_params["offset"],
                     normalization_params["scale"],
                     curvature_sampling=curvature_sampling
                 )
+                percentiles = np.percentile(all_dists, [90, 95])
                 normal_consistency = deep_sdf.metrics.compute_metric(gen_mesh=reconstruction, metric="normal_consistency")
 
                 logging.debug("chamfer distance: " + str(chamfer_dist))
 
                 chamfer_results.append(
-                    (os.path.join(dataset, class_name, instance_name), chamfer_dist, normal_consistency)
+                    (os.path.join(dataset, class_name, instance_name), (chamfer_dist, percentiles), normal_consistency)
                 )
 
     output_filename = os.path.join(
             ws.get_evaluation_dir(experiment_directory, checkpoint, True),
             "chamfer"
         )
-    output_filename += f".csv" if curvature_sampling == 0. else f"_{curvature_sampling:.3f}.csv"
+    output_filename += "_on_train_set" if "train" in split_filename else ""
+    output_filename += f".csv" if curvature_sampling == 0. else f"_{curvature_sampling:.3f}_curvature.csv"
+    logging.info(split_filename)
+    logging.info(output_filename)
     with open(output_filename,"w",) as f:
         # semicolon-separated CSV file
-        f.write("shape;chamfer_dist;all_chamfer_dist;normal_consistency\n")
+        f.write("shape;chamfer_dist;90th_percentile;95th_percentile;normal_consistency\n")
         for result in chamfer_results:
-            f.write("{};{};{};{}\n".format(result[0], result[1][0], result[1][1], result[2]))
+            f.write("{};{};{};{}\n".format(result[0], result[1][0], result[1][1][0], result[1][1][1], result[2]))
 
 
 if __name__ == "__main__":
@@ -127,7 +133,7 @@ if __name__ == "__main__":
         "--curvature_sampling",
         "-cs",
         dest="curvature_sampling",
-        default=0.,
+        default=0.0,
         required=False,
         help="Amount of sampling wrt mesh curvature. 0 means smapling wrt. face area, 1 wrt. face curvature.",
     )
@@ -148,5 +154,5 @@ if __name__ == "__main__":
             args.split_filename,
             curvature_sampling
         )
-    except ValueError:
-        logging.error(f"Could not cast {args.curvature_sampling} to float")
+    except ValueError as ve:
+        logging.error(f"Could not cast {args.curvature_sampling} to float" + str(ve.args))

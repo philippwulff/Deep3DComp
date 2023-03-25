@@ -30,5 +30,6 @@ dependencies:
     - tensorboard
     - point-cloud-utils
     - rtree
-    - robust-laplacian
-    # - ipykernel   # Might be needed if you run Jupyter Notebooks in VS Code
+    - robust_laplacian
+    - pqdm
+    # - ipykernel   # Might be needed if you run Jupyter Notebooks in VSCode

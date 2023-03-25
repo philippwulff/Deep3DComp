@@ -305,6 +305,7 @@ def plot_capacity_vs_chamfer_dist(
         exp_dirs_lat_capacity: List = None,
         voxelization_logs: List[pd.DataFrame] = None,
         checkpoint: int = 2000, 
+        plot_aspect_ratios: bool = False,
     ) -> plt.figure:
     """
     Example usage: 
@@ -323,16 +324,20 @@ def plot_capacity_vs_chamfer_dist(
         "vox": [] if not voxelization_logs else [pd.read_csv(_) for _ in voxelization_logs],
     }
     assert any([exps["net"], exps["lat"], exps["vox"]]), "NO EXPERIMENT DIRS GIVEN"
+    
+    cmap = matplotlib.cm.get_cmap("tab20")
 
     # Combine all results from different experiments.
     results = defaultdict(lambda: defaultdict(list))
+    results_per_aspect = defaultdict(lambda: defaultdict(list))
     for name, exp_dirs in exps.items():
         for exp_dir in exp_dirs:
             if name == "vox":
                 results[name]["voxel_resolutions"].append(exp_dir["voxel_resolution"].mean())
                 # +2 because we did not add the padding in the logged results
-                results[name]["num_voxels"].append((exp_dir["voxel_resolution"].mean()+2)**3)     
+                results[name]["num_voxels"].append((exp_dir["voxel_resolution"].mean()+2)**3)  
                 results[name]["cd_means"].append(exp_dir["cd"].mean())
+                print(f"Extracting vox_res={exp_dir['voxel_resolution'].mean():.1f}: CD={exp_dir['cd'].mean():.5f} num_shapes={len(exp_dir['voxel_resolution'])}")
                 try:
                     results[name]["num_sparse_voxels"].append(exp_dir["num_sparse_voxels"].mean())
                     results[name]["sparse_cd_means"].append(exp_dir["sparse_cd"].mean())
@@ -341,10 +346,14 @@ def plot_capacity_vs_chamfer_dist(
             else:
                 # Read experiment specs.
                 specs = ws.load_experiment_specifications(exp_dir)
+                dims = specs["NetworkSpecs"]["dims"]
                 arch = __import__("networks." + specs["NetworkArch"], fromlist=["Decoder"])
                 latent_size = specs["CodeLength"]
                 decoder = arch.Decoder(latent_size, **specs["NetworkSpecs"])
                 results[name]["latent_sizes"].append(latent_size)
+                results[name]["widths"].append(dims[0])
+                results[name]["depths"].append(len(dims))
+                aspect_ratio = f"8:{dims[0]/len(dims) * 8:.0f}"
                 # Calculate model size.
                 param_size = 0
                 param_cnt = 0
@@ -360,11 +369,32 @@ def plot_capacity_vs_chamfer_dist(
                 eval_log_path = os.path.join(ws.get_evaluation_dir(exp_dir, str(checkpoint)), "chamfer.csv")
                 ws.get_model_params_dir(exp_dir)
                 eval_df = pd.read_csv(eval_log_path, delimiter=";")
-                results[name]["cd_means"].append(eval_df["chamfer_dist"].mean())
-                results[name]["cd_medians"].append(eval_df["chamfer_dist"].median())
-
+                cd_mean = eval_df["chamfer_dist"].mean()
+                cd_median = eval_df["chamfer_dist"].median()
+                results[name]["cd_means"].append(cd_mean)
+                results[name]["cd_medians"].append(cd_median)
+                results_per_aspect[aspect_ratio]["param_cnts"].append(param_cnt)
+                results_per_aspect[aspect_ratio]["cd_means"].append(cd_mean)
+                results_per_aspect[aspect_ratio]["cd_medians"].append(cd_median)
+                
+                print(f"Extracting num_params={param_cnt} width={dims[0]} depth={len(dims)}: CD_mean={cd_mean:.6f} CD_median={cd_median:.6f} num_shapes={len(eval_df['chamfer_dist'])}")
+                
+                eval_log_train_path = os.path.join(ws.get_evaluation_dir(exp_dir, str(checkpoint)), "chamfer_on_train_set.csv")
+                if os.path.exists(eval_log_train_path):
+                    eval_train_df = pd.read_csv(eval_log_train_path, delimiter=";")
+                    cd_mean = eval_train_df["chamfer_dist"].mean()
+                    cd_median = eval_train_df["chamfer_dist"].median()
+                    results[name]["param_cnts_train"].append(param_cnt)
+                    results[name]["cd_means_train"].append(cd_mean)
+                    results[name]["cd_medians_train"].append(cd_median)
+                    results_per_aspect[aspect_ratio]["param_cnts_train"].append(param_cnt)
+                    results_per_aspect[aspect_ratio]["cd_means_train"].append(cd_mean)
+                    results_per_aspect[aspect_ratio]["cd_medians_train"].append(cd_median)
+                    print(f"Eval on train set: CD_mean={cd_mean:.6f} CD_median={cd_median:.6f} num_shapes={len(eval_train_df['chamfer_dist'])}")
+    if plot_aspect_ratios:
+        results["per_aspect"] = results_per_aspect
     # Plot.
-    fig, axes = plt.subplots(1, len([_ for _ in exps if exps[_]]))
+    fig, axes = plt.subplots(1, len(results), figsize=(len(results)*8, 5))
     for i, (name, result) in enumerate(results.items()):
         ax = axes[i] if isinstance(axes, np.ndarray) else axes
         if name in ["net", "lat"]:
@@ -372,8 +402,20 @@ def plot_capacity_vs_chamfer_dist(
             ax.set_ylabel("Chamfer distance")
             ax.set_xlabel(f"# of {name} params")
             x_values = result["param_cnts"] if name == "net" else result["latent_sizes"]
-            ax.plot(x_values, result["cd_means"], ls="-", label="SIREN mean CD")
-            ax.plot(x_values, result["cd_medians"], ls="--", label="SIREN median CD")
+            idxs = np.array(x_values).argsort()
+            x = np.array(x_values)[idxs]
+            y1 = np.array(result["cd_means"])[idxs]
+            y2 = np.array(result["cd_medians"])[idxs]
+            ax.plot(x, y1, ls="-", c="blue", label="SIREN (test)")
+            ax.plot(x, y2, ls="--", c="blue")
+            if "cd_means_train" in result:
+                x_values = result["param_cnts_train"]# if name == "net" else result["latent_sizes"]
+                idxs = np.array(x_values).argsort()
+                x = np.array(x_values)[idxs]
+                y1 = np.array(result["cd_means_train"])[idxs]
+                y2 = np.array(result["cd_medians_train"])[idxs]
+                ax.plot(x, y1, ls="-", c="red", label="SIREN (train)")
+                ax.plot(x, y2, ls="--", c="red")
         elif name == "vox":
             ax.set_title(f"Voxel count vs. Reconstruction Chamfer distance")
             ax.set_ylabel("Chamfer distance")
@@ -393,9 +435,37 @@ def plot_capacity_vs_chamfer_dist(
                 x, y = num_voxels[idxs], cd_means[idxs]
                 ax.scatter(x, y, marker="x", label="Sparse Voxel Grid", color="orange")
                 ax.set_xscale('log')
+        elif name == "per_aspect":
+            colors = cmap(np.linspace(0, 1, len(result)*2 if "cd_means_train" in list(result.values())[0] else len(result)))
+            for j, (aspect_ratio, res) in enumerate(result.items()):
+                c = colors[j*2]
+                ax.set_title(f"# of net params vs. Chamfer distance per aspect ratio")
+                ax.set_ylabel("Chamfer distance")
+                ax.set_xlabel(f"# of net params")
+                x_values = res["param_cnts"]
+                idxs = np.array(x_values).argsort()
+                x = np.array(x_values)[idxs]
+                y1 = np.array(res["cd_means"])[idxs]
+                y2 = np.array(res["cd_medians"])[idxs]
+                ax.plot(x, y1, ls="-", c=c, label=f"{aspect_ratio} (test)")
+                ax.plot(x, y2, ls="--", c=c)
+                if "cd_means_train" in res:
+                    c = colors[j*2+1]
+                    x_values = res["param_cnts_train"]
+                    idxs = np.array(x_values).argsort()
+                    x = np.array(x_values)[idxs]
+                    y1 = np.array(res["cd_means_train"])[idxs]
+                    y2 = np.array(res["cd_medians_train"])[idxs]
+                    ax.plot(x, y1, ls="-", c=c, label=f"{aspect_ratio} (train)")
+                    ax.plot(x, y2, ls="--", c=c)
 
-
-        ax.legend()
+        handles, labels = ax.get_legend_handles_labels()
+        custom_handles = [
+            Line2D([0], [0], label="Mean", ls="-", color="gray"),
+            Line2D([0], [0], label="Median", ls="--", color="gray")
+        ]
+        handles.extend(custom_handles) 
+        ax.legend(handles=handles)
 
     plt.close()
     return fig
@@ -414,7 +484,7 @@ def plot_manifold_tsne(exp, checkpoint=2000):
 
     # Create t-SNE.
     lat_vecs = ws.load_latent_vectors(exp, str(checkpoint))
-    lat_vecs_embedded = TSNE(n_components=2, perplexity=3).fit_transform(lat_vecs)
+    lat_vecs_embedded = TSNE(n_components=2, perplexity=1700).fit_transform(lat_vecs)
 
     # Load the shape information files.
     with open(os.path.join(exp, ws.specifications_filename), "r") as f:
@@ -439,6 +509,8 @@ def plot_manifold_tsne(exp, checkpoint=2000):
     # Plot points from all classes.
     ax_main = fig.add_subplot(gs[:2, :2])
     ax_main.scatter(lat_vecs_embedded[:, 0], lat_vecs_embedded[:, 1], s=5, c=colors)
+    ax_main.set_xlim(-1, 1)
+    ax_main.set_ylim(-1, 1)
     i = 0
     for r in range(nrows):
         for c in range(ncols):
@@ -452,6 +524,8 @@ def plot_manifold_tsne(exp, checkpoint=2000):
             color = cdict[wnlemma]
             ax.scatter(wnlemma_lat_vecs[:, 0], wnlemma_lat_vecs[:, 1], s=5, color=color)
             ax.set_title(wrap_text(wnlemma))
+            ax.set_xlim(-1, 1)
+            ax.set_ylim(-1, 1)
             i += 1
 
     # Legend and style the plot.
