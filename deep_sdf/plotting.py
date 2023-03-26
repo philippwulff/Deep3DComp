@@ -20,6 +20,8 @@ from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 from matplotlib.gridspec import GridSpec
 import matplotlib.collections as mcol
+from mpl_toolkits.axes_grid1.inset_locator import mark_inset
+
 
 import json
 if not os.name == "nt":
@@ -102,7 +104,7 @@ def plot_dist_violin(data: np.ndarray, percentile_keys: list=[50, 75, 90, 99]) -
 
 def pyrender_helper(mesh: trimesh.Trimesh, alpha=0, beta=0, gamma=0):
     """Renders a Trimesh and returns the color and depth image numpy arrays."""
-    mesh = pyrender.Mesh.from_trimesh(mesh)
+    mesh = pyrender.Mesh.from_trimesh(mesh, smooth=False)
     scene = pyrender.Scene()
     scene.add(mesh)
     camera = pyrender.PerspectiveCamera(yfov=np.pi / 3.0, aspectRatio=1.0)
@@ -110,18 +112,28 @@ def pyrender_helper(mesh: trimesh.Trimesh, alpha=0, beta=0, gamma=0):
     camera_pose[2, 3] = 2      # move in z-dir
     camera_pose = utils.rotate(camera_pose, alpha=alpha, beta=beta, gamma=gamma)
     scene.add(camera, pose=camera_pose)
-    # light = pyrender.SpotLight(color=np.ones(3), intensity=3.0,
-    #                             innerConeAngle=np.pi/16.0,
-    #                             outerConeAngle=np.pi/6.0)
+    light = pyrender.SpotLight(color=np.ones(3), intensity=10.0,
+                                innerConeAngle=np.pi/2.0,
+                                outerConeAngle=np.pi/2.0)
     # light = pyrender.DirectionalLight(color=[1, 1, 1], intensity=500.)
-    light = pyrender.PointLight(color=[1, 1, 1], intensity=1000.0)
+    # light = pyrender.PointLight(color=[1, 1, 1], intensity=1000.0)
     scene.add(light, pose=camera_pose)
     r = pyrender.OffscreenRenderer(600, 600)
     color, depth = r.render(scene)
     return color, depth
 
 
-def plot_reconstruction_comparison(experiment_dirs: List[str], shape_ids: List[str], chckpt: int = 2000, synset_id: str = "02691156", dataset_name: str = "ShapeNetV2", shapenet_dir: str = "/mnt/hdd/ShapeNetCore.v2"):
+def plot_reconstruction_comparison(
+    experiment_dirs: Dict[str, str], 
+    shape_ids: List[str], 
+    chckpt: int = 2000, 
+    synset_id: str = "02691156", 
+    dataset_name: str = "ShapeNetV2", 
+    shapenet_dir: str = "/mnt/hdd/ShapeNetCore.v2", 
+    no_axes_ticks=True,
+    inset_xxyy: list = None,
+    inset_zoom_xywh: list = [0.5, 0.5, 0.3, 0.3],
+    ):
     """
     Plot reconstructions with CD for the same shape reconstructions from different experiments 
     plus the GT mesh from ShapeNet.
@@ -138,6 +150,15 @@ def plot_reconstruction_comparison(experiment_dirs: List[str], shape_ids: List[s
     fig, ax = plt.subplots(nrows, ncols, figsize=(2*ncols, 2*nrows), dpi=200)
     # parameter meanings here: https://stackoverflow.com/questions/6541123/improve-subplot-size-spacing-with-many-subplots
     plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.02, hspace=0.05)
+    
+    def create_inset_zoom(ax, img, xywh: list, x1, x2, y1, y2):
+        axins = ax.inset_axes(xywh)   # y, x, h, w
+        axins.imshow(img, origin="lower")     
+        axins.set_xlim(x1, x2)      # subregion of the original image
+        axins.set_ylim(y1, y2)
+        axins.set_xticks([])
+        axins.set_yticks([])
+        ax.indicate_inset_zoom(axins, edgecolor="black")
 
     for r in range(0, len(angles)*len(shape_ids), len(angles)):
         shape_id = shape_ids[r//len(angles)]
@@ -156,18 +177,24 @@ def plot_reconstruction_comparison(experiment_dirs: List[str], shape_ids: List[s
         # Plot GT.
         for i, (alpha, beta, gamma) in enumerate(angles):
             gt_mesh_path = os.path.join(shapenet_dir, synset_id, shape_id, "models", "model_normalized.obj")
-            gt_mesh = utils.scale_to_unit_sphere(trimesh.load(gt_mesh_path))
+            gt_mesh = utils.scale_to_unit_sphere(utils.as_mesh(trimesh.load(gt_mesh_path)))
             color, _ = pyrender_helper(gt_mesh, alpha, beta, gamma)
-            ax[r+i, 0].imshow(color)
-            ax[r+i, 0].set_xticks([])
-            ax[r+i, 0].set_yticks([])
+            color = color[::-1, :]      # flip vertically
+            ax[r+i, 0].imshow(color, origin="lower")
+            if no_axes_ticks:
+                ax[r+i, 0].set_xticks([])     
+                ax[r+i, 0].set_yticks([])
+            if i == len(angles)-1 and inset_xxyy and len(inset_xxyy) >= r+1:
+                create_inset_zoom(ax[r+i, 0], color, inset_zoom_xywh, *inset_xxyy[r])
+        
         # Plot other experiments.
-        for c, exp_dir in enumerate(experiment_dirs):
+        for c, (exp_name, exp_dir) in enumerate(experiment_dirs.items()):
             c += 1      # first column is GT.
             if r == 0:
-                title = exp_dir.split(os.sep)[-1]
-                max_title_len = 25
-                title = "\n".join([title[y-max_title_len:y] for y in range(max_title_len, len(title)+max_title_len,max_title_len)])
+                # title = exp_dir.split(os.sep)[-1]
+                # max_title_len = 25
+                # title = "\n".join([title[y-max_title_len:y] for y in range(max_title_len, len(title)+max_title_len,max_title_len)])
+                title = exp_name
                 ax[r, c].set_title(title)
 
             mesh_path = os.path.join(exp_dir, ws.reconstructions_subdir, str(chckpt), ws.reconstruction_meshes_subdir, dataset_name, synset_id, shape_id + ".ply")
@@ -176,12 +203,16 @@ def plot_reconstruction_comparison(experiment_dirs: List[str], shape_ids: List[s
             except ValueError as e:
                 logging.error(f"File does not exist as path {mesh_path}")
             cd, cd_all = metrics.compute_metric(gt_mesh, mesh, metric="chamfer")
-            ax[r, c].annotate(f"CD={cd:.6f}", (3, color.shape[0]), va="bottom", ha="left")
+            ax[r, c].annotate(f"CD={cd:.6f}", (3, 0), va="bottom", ha="left")
             for i, (alpha, beta, gamma) in enumerate(angles):
                 color, _ = pyrender_helper(mesh, alpha, beta, gamma)
-                ax[r+i, c].imshow(color)
+                color = color[::-1, :]      # flip vertically
+                ax[r+i, c].imshow(color, origin="lower")
                 ax[r+i, c].set_xticks([])
                 ax[r+i, c].set_yticks([])
+                if i == len(angles)-1 and inset_xxyy and len(inset_xxyy) >= r+1:
+                    create_inset_zoom(ax[r+i, c], color, inset_zoom_xywh, *inset_xxyy[r])
+        
 
     plt.close()
     return fig
