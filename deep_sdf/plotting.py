@@ -21,7 +21,27 @@ from matplotlib.lines import Line2D
 from matplotlib.gridspec import GridSpec
 import matplotlib.collections as mcol
 from mpl_toolkits.axes_grid1.inset_locator import mark_inset
+import matplotlib
 
+
+
+TEXT_WIDTH = 6.875      # in inches
+COLUMN_TEXT_WIDTH = TEXT_WIDTH / 2 - 0.3125
+
+SMALL_SIZE = 6
+MEDIUM_SIZE = 6
+BIGGER_SIZE = 7
+
+plt.rc('font', size=SMALL_SIZE)          # controls default text sizes
+plt.rc('axes', titlesize=MEDIUM_SIZE)     # fontsize of the axes title
+plt.rc('axes', labelsize=MEDIUM_SIZE)    # fontsize of the x and y labels
+plt.rc('xtick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
+plt.rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
+plt.rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
+plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
+
+# mpl.rcParams['pdf.fonttype'] = 42
+# mpl.rcParams['ps.fonttype'] = 42
 
 import json
 if not os.name == "nt":
@@ -118,7 +138,7 @@ def pyrender_helper(mesh: trimesh.Trimesh, alpha=0, beta=0, gamma=0):
     # light = pyrender.DirectionalLight(color=[1, 1, 1], intensity=500.)
     # light = pyrender.PointLight(color=[1, 1, 1], intensity=1000.0)
     scene.add(light, pose=camera_pose)
-    r = pyrender.OffscreenRenderer(600, 600)
+    r = pyrender.OffscreenRenderer(1000, 1000)
     color, depth = r.render(scene)
     return color, depth
 
@@ -133,6 +153,10 @@ def plot_reconstruction_comparison(
     no_axes_ticks=True,
     inset_xxyy: list = None,
     inset_zoom_xywh: list = [0.5, 0.5, 0.3, 0.3],
+    angle_num: int = 3,
+    repeat_titles: bool = True,
+    dpi: int = 300,
+    suffix: str = "",
     ):
     """
     Plot reconstructions with CD for the same shape reconstructions from different experiments 
@@ -144,27 +168,39 @@ def plot_reconstruction_comparison(
         (-math.pi/4, 3*math.pi/4, 0),   # view from upper-left
         (0, 3*math.pi/4, 0),    # view from center-left
     ]
+    angles = angles[:min(len(angles), angle_num)]
+    column_titles = []
+    title_fontweight = "normal"
 
     nrows = len(angles)*len(shape_ids)
     ncols = len(experiment_dirs)+1
-    fig, ax = plt.subplots(nrows, ncols, figsize=(2*ncols, 2*nrows), dpi=200)
+    # figsize = (2*ncols, 2*nrows)
+    figsize = (TEXT_WIDTH, TEXT_WIDTH/ncols*nrows-0.3)
+    fig, ax = plt.subplots(nrows, ncols, figsize=figsize, dpi=dpi)
     # parameter meanings here: https://stackoverflow.com/questions/6541123/improve-subplot-size-spacing-with-many-subplots
     plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.02, hspace=0.05)
     
     def create_inset_zoom(ax, img, xywh: list, x1, x2, y1, y2):
         axins = ax.inset_axes(xywh)   # y, x, h, w
+        for child in axins.get_children():
+            if isinstance(child, matplotlib.spines.Spine):
+                child.set(linewidth=0.5, color="black")
         axins.imshow(img, origin="lower")     
         axins.set_xlim(x1, x2)      # subregion of the original image
         axins.set_ylim(y1, y2)
         axins.set_xticks([])
         axins.set_yticks([])
-        ax.indicate_inset_zoom(axins, edgecolor="black")
+        _, conns = ax.indicate_inset_zoom(axins, edgecolor="black", alpha=0.5, linewidth=0.5)
+        for conn in conns:
+            conn.set(linewidth=0.5)
 
+    shape_idx = 0
     for r in range(0, len(angles)*len(shape_ids), len(angles)):
         shape_id = shape_ids[r//len(angles)]
 
         if r == 0:
-            ax[r, 0].set_title("GT")
+            ax[r, 0].set_title("GT", fontweight=title_fontweight)
+            column_titles.append("GT")
 
         if r % len(angles) == 0:
             # Add mesh name 
@@ -172,7 +208,7 @@ def plot_reconstruction_comparison(
             bottom = ax[r+len(angles)-1, 0].get_position().ymin
             top = ax[r, 0].get_position().ymax
             # NOTE: This does not work with fig.tight_layout()
-            fig.text(left-0.01, (top+bottom)/2, shape_id, va="center", ha="right", rotation="vertical")
+            fig.text(left-0.01, (top+bottom)/2, shape_id, va="center", ha="right", rotation="vertical", fontsize=BIGGER_SIZE)
         
         # Plot GT.
         for i, (alpha, beta, gamma) in enumerate(angles):
@@ -184,8 +220,9 @@ def plot_reconstruction_comparison(
             if no_axes_ticks:
                 ax[r+i, 0].set_xticks([])     
                 ax[r+i, 0].set_yticks([])
-            if i == len(angles)-1 and inset_xxyy and len(inset_xxyy) >= r+1:
-                create_inset_zoom(ax[r+i, 0], color, inset_zoom_xywh, *inset_xxyy[r])
+                ax[r+i, 0].set_axis_off()
+            if i == len(angles)-1 and inset_xxyy and len(inset_xxyy) > shape_idx:
+                create_inset_zoom(ax[r+i, 0], color, inset_zoom_xywh, *inset_xxyy[shape_idx])
         
         # Plot other experiments.
         for c, (exp_name, exp_dir) in enumerate(experiment_dirs.items()):
@@ -195,26 +232,44 @@ def plot_reconstruction_comparison(
                 # max_title_len = 25
                 # title = "\n".join([title[y-max_title_len:y] for y in range(max_title_len, len(title)+max_title_len,max_title_len)])
                 title = exp_name
-                ax[r, c].set_title(title)
+                ax[r, c].set_title(title, fontweight=title_fontweight)
+                column_titles.append(title)
 
-            mesh_path = os.path.join(exp_dir, ws.reconstructions_subdir, str(chckpt), ws.reconstruction_meshes_subdir, dataset_name, synset_id, shape_id + ".ply")
+            mesh_paths = [
+                os.path.join(exp_dir, ws.reconstructions_subdir, str(chckpt), ws.reconstruction_meshes_subdir, dataset_name, synset_id, shape_id + ".ply"),
+                os.path.join(exp_dir, synset_id, shape_id + ".ply"),
+            ]
+            mesh_path = [_ for _ in mesh_paths if os.path.exists(_)][0]
             try:
                 mesh = utils.scale_to_unit_sphere(trimesh.load(mesh_path))
             except ValueError as e:
                 logging.error(f"File does not exist as path {mesh_path}")
-            cd, cd_all = metrics.compute_metric(gt_mesh, mesh, metric="chamfer")
-            ax[r, c].annotate(f"CD={cd:.6f}", (3, 0), va="bottom", ha="left")
+            cd, cd_all = metrics.compute_metric(gt_mesh, mesh, metric="chamfer")        
+            ax[r, c].annotate(f"CD={cd:.6f}", (0, 0), va="top", ha="left", fontsize=MEDIUM_SIZE)
+            ax[r, c].set(zorder=999)
+            
             for i, (alpha, beta, gamma) in enumerate(angles):
                 color, _ = pyrender_helper(mesh, alpha, beta, gamma)
                 color = color[::-1, :]      # flip vertically
                 ax[r+i, c].imshow(color, origin="lower")
                 ax[r+i, c].set_xticks([])
                 ax[r+i, c].set_yticks([])
-                if i == len(angles)-1 and inset_xxyy and len(inset_xxyy) >= r+1:
-                    create_inset_zoom(ax[r+i, c], color, inset_zoom_xywh, *inset_xxyy[r])
+                ax[r+i, c].set_axis_off()
+                if i == len(angles)-1 and inset_xxyy and len(inset_xxyy) > shape_idx:
+                    create_inset_zoom(ax[r+i, c], color, inset_zoom_xywh, *inset_xxyy[shape_idx])  
+                    
+        shape_idx += 1
         
-
+    # Add titles at bottom too!
+    if repeat_titles:
+        for c, title in enumerate(column_titles):
+            ax[-1, c].annotate(title, (color.shape[0]/2, 50), va="top", ha="center", fontsize=MEDIUM_SIZE, fontweight=title_fontweight)
+        
+    # fig.tight_layout()
     plt.close()
+    savepath = f"reconstruction_comparison{'_'+suffix if suffix else ''}.pdf"
+    print(f"Saving .png to {savepath}")
+    fig.savefig(savepath, bbox_inches='tight', dpi=dpi)
     return fig
 
 
@@ -341,6 +396,7 @@ def plot_capacity_vs_chamfer_dist(
         checkpoint: int = 2000, 
         plot_aspect_ratios: bool = False,
         plot_means: bool = False,
+        add_title: bool = True,
     ) -> plt.figure:
     """
     Example usage: 
@@ -365,11 +421,14 @@ def plot_capacity_vs_chamfer_dist(
             if name == "vox":
                 results[name]["voxel_resolutions"].append(exp_dir["voxel_resolution"].mean())
                 # +2 because we did not add the padding in the logged results
-                results[name]["num_voxels"].append((exp_dir["voxel_resolution"].mean()+2)**3)  
+                num_voxels = (exp_dir["voxel_resolution"].mean()+2)**3
+                results[name]["num_voxels"].append(num_voxels)  
                 results[name]["cd_means"].append(exp_dir["cd"].mean())
                 print(f"Extracting vox_res={exp_dir['voxel_resolution'].mean():.1f}: CD={exp_dir['cd'].mean():.5f} num_shapes={len(exp_dir['voxel_resolution'])}")
                 try:
-                    results[name]["num_sparse_voxels"].append(exp_dir["num_sparse_voxels"].mean())
+                    num_sparse_voxels = exp_dir["num_sparse_voxels"].mean()
+                    print(f"   -> num_vox={num_voxels} num_sparse_voxels={num_sparse_voxels:.0f}")
+                    results[name]["num_sparse_voxels"].append(num_sparse_voxels)
                     results[name]["sparse_cd_means"].append(exp_dir["sparse_cd"].mean())
                 except KeyError:
                     pass
@@ -428,7 +487,9 @@ def plot_capacity_vs_chamfer_dist(
         results["per_aspect"] = results_per_aspect
     # Plot.
     columns = int("net" in results or "net_relu" in results) + int("vox" in results or "lat" in results) + int("per_aspect" in results)
-    fig, axes = plt.subplots(1, columns, figsize=(columns*7, 5), sharey=True, dpi=200)
+    figsize = (columns*7, 5)
+    figsize = (COLUMN_TEXT_WIDTH, 2)
+    fig, axes = plt.subplots(1, columns, figsize=figsize, sharey=True, dpi=200)
     axes_dict = {
         "net": axes[0] if isinstance(axes, np.ndarray) else axes,
         "net_relu": axes[0] if isinstance(axes, np.ndarray) else axes,
@@ -452,14 +513,17 @@ def plot_capacity_vs_chamfer_dist(
         c = c if c is not None else display_labels_colors_linestyle[name][1]
         ls = ls if ls is not None else display_labels_colors_linestyle[name][2]
         if plot_means:
-            ax.plot(x, y1, ls=":", c=c)
-        ax.plot(x, y2, ls=ls, c=c, label=label)
+            ax.plot(x, y1, ls=ls, c=c, label=label, linewidth=0.5)
+        else:   # Plot medians
+            ax.plot(x, y2, ls=ls, c=c, label=label, linewidth=0.5)
 
     for i, (name, result) in enumerate(results.items()):
         ax = axes_dict[name]
         if name in ["net", "net_relu"]:
-            ax.set_title(f"No. of Network Parameters vs. Reconstruction Quality")
+            if add_title:
+                ax.set_title(f"No. of Network Parameters vs. Reconstruction Quality")
             ax.set_xlabel(f"No. of Network Parameters")
+            # ax.set_yticklabels([2e-5, 6e-5, 1e-4])
             x_values = result["param_cnts"]
             idxs = np.array(x_values).argsort()
             plot(
@@ -476,9 +540,11 @@ def plot_capacity_vs_chamfer_dist(
                     np.array(x_values)[idxs],
                     np.array(result["cd_means_train"])[idxs],
                     np.array(result["cd_medians_train"])[idxs],
-                )
+                )    
+                
         elif name == "lat":
-            ax.set_title(f"Representation Size vs. Reconstruction Quality")
+            if add_title:
+                ax.set_title(f"Representation Size vs. Reconstruction Quality")
             ax.set_xlabel(f"No. of Voxels or Latent Code Length")
             x_values = result["latent_sizes"]
             idxs = np.array(x_values).argsort()
@@ -488,29 +554,32 @@ def plot_capacity_vs_chamfer_dist(
                 np.array(result["cd_means"])[idxs],
                 np.array(result["cd_medians"])[idxs],
             )
+            ax.scatter(np.array(x_values)[idxs], np.array(result["cd_medians"])[idxs], marker="x", color="green", linewidth=1, s=3)
         elif name == "vox":
-            ax.set_title(f"Representation Size vs. Reconstruction Quality")
-            ax.set_xlabel(f"No. of Voxels or Latent Code Length")
+            if add_title:    
+                ax.set_title(f"Representation Size vs. Reconstruction Quality")
+            ax.set_xlabel(f"Latent Code Length or No. of Voxels")
+            ax.set_xscale('log')
             num_voxels = np.array(result["num_voxels"])
             cd_means = np.array(result["cd_means"])
             idxs = num_voxels.argsort()
             x, y = num_voxels[idxs], cd_means[idxs]
-            ax.scatter(x, y, marker="x", label="Dense Voxel Grid", color="red")
-            # numpy.polyfit(numpy.log(x), y, 1)
-            # plt.plot(np.unique(x), np.poly1d(np.polyfit(x, y, 1))(np.unique(x)), ls="-.", c="red")
+            ax.scatter(x, y, marker="x", color="red", linewidth=1, s=3)
+            ax.plot(x, y, linewidth=0.5, label="Dense Voxel Grid", color="red")
 
             if "num_sparse_voxels" in result:
                 num_voxels = np.array(result["num_sparse_voxels"])
                 cd_means = np.array(result["sparse_cd_means"])
                 idxs = num_voxels.argsort()
                 x, y = num_voxels[idxs], cd_means[idxs]
-                ax.scatter(x, y, marker="x", label="Sparse Voxel Grid", color="orange")
-                ax.set_xscale('log')
+                ax.scatter(x, y, marker="x", color="orange", linewidth=1, s=3)
+                ax.plot(x, y, linewidth=0.5, label="Sparse Voxel Grid", color="orange")
         elif name == "per_aspect":
             colors = cmap(np.linspace(0, 1, len(result)*2 if result and "cd_means_train" in list(result.values())[0] else len(result)))
             for j, (aspect_ratio, res) in enumerate(result.items()):
                 j *= 2 if "cd_means_train" in res else 1
-                ax.set_title(f"Per Aspect Ratio: No. of Network Parameters vs. Reconstruction Quality")
+                if add_title:
+                    ax.set_title(f"Per Aspect Ratio: No. of Network Parameters vs. Reconstruction Quality")
                 ax.set_xlabel(f"No. of Network Parameters")
                 x_values = res["param_cnts"]
                 idxs = np.array(x_values).argsort()
@@ -535,22 +604,25 @@ def plot_capacity_vs_chamfer_dist(
                         ls = "--",
                     )
 
-        handles, labels = ax.get_legend_handles_labels()
-        lc = mcol.LineCollection(2*[[(0,0)]], linestyles=["-", "--"], colors=["gray", "gray"])
-        handles.append(lc)
-        labels.append("Median")
-            #Line2D([0], [0], label="Median", ls="-", color="gray")]
-        if plot_means:
-            handles.append(Line2D([0], [0], ls=":", color="gray"))
-            labels.append("Mean")
+        # handles, labels = ax.get_legend_handles_labels()
+        # lc = mcol.LineCollection(2*[[(0,0)]], linestyles=["-", "--"], colors=["gray", "gray"])
+        # handles.append(lc)
+        # labels.append("Median")
+        # if plot_means:
+        #     handles.append(Line2D([0], [0], ls=":", color="gray"))
+        #     labels.append("Mean")
         if i == 0:
-            ax.set_ylabel("Chamfer distance")
-        ax.legend(handles=handles, labels=labels, handler_map={type(lc): HandlerDashedLines()}, handleheight=1.2)
+            ax.set_ylabel(f"{'Median' if not plot_means else 'Mean'} Chamfer Distance")
+        # ax.legend(handles=handles, labels=labels, handler_map={type(lc): HandlerDashedLines()}, handleheight=1.2)
+        ax.legend(loc="upper right")
         ax.set_yscale('log')
         ax.grid(axis="y", which="both", linestyle=":")
     
     fig.tight_layout()
     plt.close()
+    savepath = f"paramsVquality_{'_'.join(results)}{'_meanCD' if plot_means else ''}.pdf"
+    print(f"Saving .pdf to {savepath}")
+    fig.savefig(savepath)
     return fig
 
 class HandlerDashedLines(HandlerLineCollection):

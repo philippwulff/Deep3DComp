@@ -8,7 +8,8 @@ data/*
 **/3d_metrics
 .DS_store
 .idea
-.npz
+*.npz
+*.pdf
 
 # Log files, reconstructions
 **/LatentCodes
