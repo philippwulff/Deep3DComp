@@ -6,6 +6,7 @@ from typing import Union, List, Dict
 import os
 import deep_sdf.workspace as ws
 from deep_sdf import utils, metrics
+import deep_sdf
 import sklearn
 from sklearn.manifold import TSNE
 import trimesh
@@ -22,7 +23,7 @@ from matplotlib.gridspec import GridSpec
 import matplotlib.collections as mcol
 from mpl_toolkits.axes_grid1.inset_locator import mark_inset
 import matplotlib
-
+import torch
 
 
 TEXT_WIDTH = 6.875      # in inches
@@ -744,5 +745,55 @@ def plot_manifold_tsne(exp, checkpoint=2000):
     ax_main.set_title("t-SNE plot of latent space")
 
     # fig.tight_layout()
+    plt.close()
+    return fig
+
+
+def plot_lat_interpolation(
+    exp_dir: str,    
+    shape_id_1: str,
+    shape_id_2: str,
+    interpolation_weight: float,
+    synset_id: str = "02691156", 
+    dataset_name: str = "ShapeNetV2", 
+    checkpoint: int = 2000
+    ):
+    assert 0.0 <= interpolation_weight <= 1.0, "INTERPOLATION WEIGHT MUST BE IN [0.0, 1.0]"
+    
+    fig, ax = plt.subplots(1, 1)
+    
+    latents = ws.load_latent_vectors(exp_dir, checkpoint)
+    
+    with open(os.path.join(exp_dir, "specs.json")) as f:
+        specs = json.load(f)
+    with open(specs["SplitsTrain"]) as f:
+        splits = json.load(f)
+        shape_ids = splits[dataset_name][synset_id]
+        latent1 = latents(shape_ids.index(shape_id_1))
+        latent2 = latents(shape_ids.index(shape_id_2))
+        latent = torch.lerp(latent1, latent2, interpolation_weight)
+
+    arch = __import__("networks." + specs["NetworkArch"], fromlist=["Decoder"])
+    latent_size = specs["CodeLength"]
+    decoder = arch.Decoder(latent_size, **specs["NetworkSpecs"])
+    decoder = torch.nn.DataParallel(decoder)
+
+    saved_model_state = torch.load(
+        os.path.join(
+            exp_dir, ws.model_params_subdir, str(checkpoint) + ".pth"
+        )
+    )
+    decoder.load_state_dict(saved_model_state["model_state_dict"])
+    decoder = decoder.module.cuda()
+    
+    with torch.no_grad():
+        mesh = deep_sdf.mesh.create_mesh(
+            decoder, latent, N=256, max_batch=int(2 ** 18), return_trimesh=True
+        )
+    
+    color, _ = pyrender_helper(mesh, -math.pi/4, 3*math.pi/4, 0)
+    ax.imshow(color)
+    
+    fig.tight_layout()
     plt.close()
     return fig
