@@ -112,21 +112,21 @@ if __name__ == "__main__":
         "--checkpoint",
         "-c",
         dest="checkpoint",
-        default="latest",
+        default="2000",
         help="The checkpoint to test.",
     )
     arg_parser.add_argument(
         "--data",
         "-d",
         dest="data_source",
-        required=True,
+        default="../../shared/deepsdfcomp/data/",
         help="The data source directory.",
     )
     arg_parser.add_argument(
         "--split",
         "-s",
         dest="split_filename",
-        required=True,
+        default="../../shared/deepsdfcomp/experiments/splits/sv2_planes_test.json",
         help="The split to evaluate.",
     )
     arg_parser.add_argument(
