@@ -1,0 +1,65 @@
+{
+    "Description": "Validating impact of latent size on vanilla deepsdf",
+    "DataSource": "/home/shared/deepsdfcomp/data",
+    "TrainSplit": "/home/shared/deepsdfcomp/searches/splits/sv2_planes_train.json",
+    "TestSplit": "/home/shared/deepsdfcomp/searches/splits/sv2_planes_test_20.json",
+    "NetworkArch": "siren_decoder",
+    "NetworkSpecs": {
+        "dims": [
+            256,
+            256,
+            256,
+            306,
+            256,
+            256,
+            256,
+            256
+        ],
+        "dropout": [],
+        "dropout_prob": 0,
+        "norm_layers": [],
+        "latent_in": [
+            4
+        ],
+        "xyz_in_all": true,
+        "latent_dropout": true,
+        "weight_norm": true,
+        "nonlinearity": "sine",
+        "encoding_features": 1,
+        "encoding_sigma": 0
+    },
+    "CodeLength": 50,
+    "NumEpochs": 2001,
+    "SnapshotFrequency": 100,
+    "AdditionalSnapshots": [
+        100,
+        500
+    ],
+    "LearningRateSchedule": [
+        {
+            "Type": "Step",
+            "Initial": 0.0005,
+            "Interval": 500,
+            "Factor": 0.5
+        },
+        {
+            "Type": "Step",
+            "Initial": 0.001,
+            "Interval": 500,
+            "Factor": 0.5
+        }
+    ],
+    "SamplesPerScene": 16384,
+    "ScenesPerBatch": 128,
+    "DataLoaderThreads": 8,
+    "ClampingDistance": 0.1,
+    "CodeRegularization": true,
+    "CodeRegularizationLambda": 0.0001,
+    "CodeBound": 1.0,
+    "EvalTrainFrequency": 100,
+    "EvalTestFrequency": 100,
+    "EvalTestOptimizationSteps": 200,
+    "EvalTrainSceneNumber": 10,
+    "EvalTestSceneNumber": 20
+}
+

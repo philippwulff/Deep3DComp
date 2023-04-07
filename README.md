@@ -1,22 +1,6 @@
-# DeepSDF
+# Deep3DComp
 
-This is an implementation of the CVPR '19 paper "DeepSDF: Learning Continuous Signed Distance Functions for Shape Representation" by Park et al. See the paper [here][6]. 
-
-[![DeepSDF Video](https://img.youtube.com/vi/LILRJzMQw5o/0.jpg)](https://www.youtube.com/watch?v=LILRJzMQw5o)
-
-## Citing DeepSDF
-
-If you use DeepSDF in your research, please cite the
-[paper](http://openaccess.thecvf.com/content_CVPR_2019/html/Park_DeepSDF_Learning_Continuous_Signed_Distance_Functions_for_Shape_Representation_CVPR_2019_paper.html):
-```
-@InProceedings{Park_2019_CVPR,
-author = {Park, Jeong Joon and Florence, Peter and Straub, Julian and Newcombe, Richard and Lovegrove, Steven},
-title = {DeepSDF: Learning Continuous Signed Distance Functions for Shape Representation},
-booktitle = {The IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
-month = {June},
-year = {2019}
-}
-```
+This is an implementation of our 2023 semester project *Deep 3D-Shape Compression*. You can read our [research report](https://github.com/philippwulff/Deep3DComp/blob/main/docs/Deep3DComp_report.pdf) or view a summary of our results on our [website](https://philippwulff.github.io/Deep3DComp/). We thank the authors of [DeepSDF](https://github.com/facebookresearch/DeepSDF) from whom be borrow code.
 
 ## File Organization
 
@@ -68,6 +52,14 @@ Each DeepSDF experiment is organized in an "experiment directory", which collect
             <Epoch>.json
         EarthMoversDistance/
             <Epoch>.json
+    TensorBoard/
+        ReconstructionsTrain/
+            <classID_shapeID>/
+                <epoch=Epoch>.ply
+        ReconstructionsTest/
+            <classID_shapeID>/
+                <epoch=Epoch>.ply
+        TensorBoardLogFile
 ```
 
 The only file that is required to begin an experiment is 'specs.json', which sets the parameters, network architecture, and data to be used for the experiment.
@@ -117,16 +109,6 @@ python train_deep_sdf.py -e <experiment_directory>
 
 Parameters of training are stored in a "specification file" in the experiment directory, which (1) avoids proliferation of command line arguments and (2) allows for easy reproducibility. This specification file includes a reference to the data directory and a split file specifying which subset of the data to use for training.
 
-##### Visualizing Progress
-
-All intermediate results from training are stored in the experiment directory. To visualize the progress of a model during training, run:
-
-```
-python plot_log.py -e <experiment_directory>
-```
-
-By default, this will plot the loss but other values can be shown using the `--type` flag.
-
 ##### Continuing from a Saved Optimization State
 
 If training is interrupted, pass the `--continue` flag along with a epoch index to `train_deep_sdf.py` to continue from the saved state at that epoch. Note that the saved state needs to be present --- to check which checkpoints are available for a given experiment, check the `ModelParameters', 'OptimizerParameters', and 'LatentCodes' directories (all three are needed).
@@ -153,12 +135,7 @@ Before evaluating a DeepSDF model, a second mesh preprocessing step is required 
 python evaluate.py -e <experiment_directory> -d <data_directory> --split <split_filename>
 ```
 
-##### Note on Table 3 from the CVPR '19 Paper
-
-Given the stochastic nature of shape reconstruction (shapes are reconstructed via gradient descent with a random initialization), reconstruction accuracy will vary across multiple reruns of the same shape. The metrics listed in Table 3 for the "chair" and "plane" are the result of performing two reconstructions of each shape and keeping the one with the lowest chamfer distance. The code as released does not support this evaluation and thus the reproduced results will likely differ from those produced in the paper. For example, our test run with the provided code produced Chamfer distance (multiplied by 10<sup>3</sup>) mean and median of 0.157 and 0.062 respectively for the "chair" class and 0.101 and 0.044 for the "plane" class (compared to 0.204, 0.072 for chairs and 0.143, 0.036 for planes reported in the paper). 
-
-
-## Examples
+## Commonly Used Commands
 
 Here's a list of commands for a typical use case of training and evaluating a DeepSDF model using the "sofa" class of the ShapeNet version 2 dataset. 
 
@@ -200,15 +177,20 @@ python evaluate.py -e ../../shared/deepsdfcomp/searches/double_nonlinearity/line
 
 ## Team
 
-Jeong Joon Park, Peter Florence, Julian Straub, Richard Newcombe, Steven Lovegrove
+Philipp Wulff and Leonard Freißmuth.
 
-## Acknowledgements
+We want thank Prof. Matthias Nießner for supervising our project.
 
-We want to acknowledge the help of Tanner Schmidt with releasing the code.
+## Citation
 
-## License
+If you use Deep3DComp in your research, please cite:
 
-DeepSDF is relased under the MIT License. See the [LICENSE file][5] for more details.
-
-[5]: https://github.com/facebookresearch/DeepSDF/blob/master/LICENSE
-[6]: http://openaccess.thecvf.com/content_CVPR_2019/html/Park_DeepSDF_Learning_Continuous_Signed_Distance_Functions_for_Shape_Representation_CVPR_2019_paper.html
+```
+@article{freissmuth2023deep3dcomp,
+  author    = {Freissmuth, Leonard and Wulff, Philipp},
+  title     = {Deep 3D-Shape Compression},
+  year      = {2023},
+  month     = {Mar},
+  url       = {https://philippwulff.github.io/Deep3DComp/}
+}
+```
