@@ -1,8 +1,8 @@
 {
     "Description": "Validating impact of latent size on vanilla deepsdf",
-    "DataSource": "/home/florian_wulff_4/Deep3DComp/data",
-    "TrainSplit": "/home/florian_wulff_4/Deep3DComp/examples/splits/sv2_planes_train.json",
-    "TestSplit": "/home/florian_wulff_4/Deep3DComp/examples/splits/sv2_planes_test_20.json",
+    "DataSource": "/home/shared/deepsdfcomp/data",
+    "TrainSplit": "/home/shared/deepsdfcomp/searches/splits/sv2_planes_train.json",
+    "TestSplit": "/home/shared/deepsdfcomp/searches/splits/sv2_planes_test_20.json",
     "ShapeNetPath": "/mnt/hdd/ShapeNetCore.v2",
     "NetworkArch": "siren_decoder",
     "NetworkSpecs": {

@@ -24,6 +24,7 @@ import matplotlib.collections as mcol
 from mpl_toolkits.axes_grid1.inset_locator import mark_inset
 import matplotlib
 import torch
+from itertools import chain
 
 
 TEXT_WIDTH = 6.875      # in inches
@@ -761,16 +762,20 @@ def plot_lat_interpolation(
     assert 0.0 <= interpolation_weight <= 1.0, "INTERPOLATION WEIGHT MUST BE IN [0.0, 1.0]"
     
     fig, ax = plt.subplots(1, 1)
+    ax.set_xticks([])
+    ax.set_yticks([])
     
-    latents = ws.load_latent_vectors(exp_dir, checkpoint)
+    # Load latent vectors from training.
+    latents = ws.load_latent_vectors(exp_dir, str(checkpoint)).cuda()
     
     with open(os.path.join(exp_dir, "specs.json")) as f:
         specs = json.load(f)
-    with open(specs["SplitsTrain"]) as f:
+    with open(specs["TrainSplit"]) as f:
         splits = json.load(f)
-        shape_ids = splits[dataset_name][synset_id]
-        latent1 = latents(shape_ids.index(shape_id_1))
-        latent2 = latents(shape_ids.index(shape_id_2))
+        shape_ids = [shape_id for synset_id in splits[dataset_name] for shape_id in splits[dataset_name][synset_id]]
+        splits[dataset_name][synset_id]
+        latent1 = latents[shape_ids.index(shape_id_1)]
+        latent2 = latents[shape_ids.index(shape_id_2)]
         latent = torch.lerp(latent1, latent2, interpolation_weight)
 
     arch = __import__("networks." + specs["NetworkArch"], fromlist=["Decoder"])

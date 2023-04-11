@@ -13,6 +13,7 @@ import os
 import subprocess
 import math
 from trimesh import creation, transformations
+import tempfile
 
 from deep_sdf import utils
 
@@ -72,6 +73,11 @@ def create_mesh(decoder, latent_vec, filename=None, N=256, max_batch=32 ** 3, of
     end = time.time()
     logging.debug("[create_mesh] sampling takes: %f" % (end - start))
 
+    tmpdirname = None
+    if not ply_filename: 
+        tmpdirname = tempfile.TemporaryDirectory()
+        ply_filename = os.path.join(tmpdirname.name, "create_mesh_ply")
+
     success = convert_sdf_samples_to_ply(
         sdf_values.data.cpu(),
         voxel_origin,
@@ -81,7 +87,10 @@ def create_mesh(decoder, latent_vec, filename=None, N=256, max_batch=32 ** 3, of
         scale,
     )
     if return_trimesh and success:
-        return utils.as_mesh(trimesh.load(ply_filename + ".ply"))
+        mesh = utils.as_mesh(trimesh.load(ply_filename + ".ply"))
+        if tmpdirname: 
+            tmpdirname.cleanup()
+        return mesh
 
 
 def convert_sdf_samples_to_ply(
