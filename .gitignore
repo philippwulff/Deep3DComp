@@ -10,6 +10,7 @@ data/*
 .idea
 *.npz
 *.pdf
+*.jpg
 
 # Log files, reconstructions
 **/LatentCodes

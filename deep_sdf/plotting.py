@@ -762,8 +762,7 @@ def plot_lat_interpolation(
     assert 0.0 <= interpolation_weight <= 1.0, "INTERPOLATION WEIGHT MUST BE IN [0.0, 1.0]"
     
     fig, ax = plt.subplots(1, 1)
-    ax.set_xticks([])
-    ax.set_yticks([])
+    ax.set_axis_off()
     
     # Load latent vectors from training.
     latents = ws.load_latent_vectors(exp_dir, str(checkpoint)).cuda()
